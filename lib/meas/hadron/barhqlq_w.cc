@@ -239,47 +239,53 @@ namespace Chroma
                               const SpinMatrix& T, const SpinMatrix& Cg5)
       {
 
-          //1 is u, 2 is d
+          //1 is u, 2 is s, 3 is s->u (i.e. this is for Xi^0->Sigma^+, for n->p, s=d)
           
-          LatticeComplex tmp;
-/*
+	LatticeComplex tmp1,tmp2,tmp3,tmp4;
+
           LatticePropagator q1_tmp = quark_propagator_2 * Cg5;
           LatticePropagator q2_tmp = Cg5 * quark_propagator_1;
           
-          tmp = traceColor(traceSpin(quarkContract24(q1_tmp, q2_tmp)) * traceSpin(T * quark_propagator_ud));
+          tmp1 = traceColor(traceSpin(quarkContract24(q1_tmp, q2_tmp)) * traceSpin(T * quark_propagator_ud));
           
-          tmp += trace(quarkContract13(q1_tmp, q2_tmp) * T * quark_propagator_ud);
+          tmp2 = trace(quarkContract13(q1_tmp, q2_tmp) * T * quark_propagator_ud);
           
-          tmp += trace(T * quarkContract24(q1_tmp, q2_tmp) * quark_propagator_ud);
+          tmp3 = trace(T * quarkContract24(q1_tmp, q2_tmp) * quark_propagator_ud);
           
-          q1_tmp = T * q1_tmp;
-          tmp += trace(quarkContract14(q1_tmp, q2_tmp) * quark_propagator_ud);
-*/        
+	  //          q1_tmp = T * q1_tmp;
+          tmp4 = trace(quarkContract14(T*q1_tmp, q2_tmp) * quark_propagator_ud);
+
+
+        
 // I think there is a minus sign missing in the final term above. Below tries to match the layout in notes from May 4, 2010
 //
 // First compute Cg5 S Cg5 for both u and d quarks
+/*
           LatticePropagator q1_tmp = Cg5 * quark_propagator_1 * Cg5;
-          LatticePropagator q2_tmp = Cg5 * quark_propagator_2 * Cg5;
-          
-          tmp = traceColor(traceSpin(quarkContract24(quark_propagator_1, q2_tmp)) * traceSpin(T * quark_propagator_ud));
-          
-          tmp += trace(T * quark_propagator_ud * quarkContract13(q1_tmp, quark_propagator_2));
-          
-          tmp += trace(T * quarkContract24(quark_propagator_1, q2_tmp) * quark_propagator_ud);
-          
-          q1_tmp = Cg5 * T * Cg5 * q1_tmp;
-          tmp -= trace(quarkContract14(q1_tmp, q2_tmp) * quark_propagator_ud);
+          LatticePropagator q2_tmp = Cg5 * quark_propagator_2 * Cg5;          
 
-          return LatticeComplex(tmp);
+          tmp1 = trace(T * traceColor(quark_propagator_ud * traceSpin(quarkContract24(quark_propagator_1,q2_tmp))));
+
+	  tmp2 = trace(T * quark_propagator_ud * quarkContract13(q1_tmp, quark_propagator_2));
+          
+          tmp3 = trace(T * quarkContract24(quark_propagator_1, q2_tmp) * quark_propagator_ud);
+          
+          tmp4 = -trace(quarkContract14(Cg5 * T * Cg5* q1_tmp, q2_tmp) * quark_propagator_ud);
+*/
+          return LatticeComplex(tmp1+tmp2+tmp3+tmp4);
 
       }
       
-      LatticeComplex p_to_p_u2pt(const LatticePropagator& quark_propagator_u,
-                               const LatticePropagator& quark_propagator_d,
-                               const LatticePropagator& quark_propagator_uu,
+      LatticeComplex p_to_p_u2pt(const LatticePropagator& u,
+                               const LatticePropagator& d,
+                               const LatticePropagator& uu,
                                const SpinMatrix& T, const SpinMatrix& Cg5)
       {
           
+	return (sigma2pt(d,uu,u,T,Cg5) + sigma2pt(uu,d,u,T,Cg5));
+
+	/* The following seems to be compiler dependent. Not sure why. Above is simpler anyway
+
           LatticeComplex tmp;
           LatticePropagator q1_tmp = quark_propagator_u * Cg5;
           LatticePropagator q2_tmp = Cg5 * quark_propagator_d;
@@ -289,15 +295,15 @@ namespace Chroma
           
           tmp += trace(traceSpin(di_quark) * T * quark_propagator_uu);
           
-          q1_tmp = q2_tmp * Cg5;
+          q1_tmp = Cg5 * quark_propagator_d * Cg5;
           q2_tmp = quark_propagator_u * T;
           
           tmp -= trace(quarkContract13(q1_tmp, q2_tmp) * quark_propagator_uu);
           
           tmp -= trace(transposeSpin(quarkContract12(q2_tmp, q1_tmp)) * quark_propagator_uu);
           
-          return LatticeComplex(tmp);
-          
+          return tmp;
+	*/
       }
 
 

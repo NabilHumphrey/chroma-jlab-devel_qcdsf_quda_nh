@@ -350,7 +350,6 @@ namespace Chroma
     int num_mom = phases.numMom();
     barprop.resize(num_baryons,num_mom,length);
 
-
     // T_mixed = (1 + \Sigma_3)*(1 + gamma_4) / 2
     //         = (1 + Gamma(8) - i G(3) - i G(11)) / 2
     SpinMatrix T_mixed = BaryonSpinMats::Tmixed();
@@ -387,6 +386,8 @@ namespace Chroma
 
     LatticeComplex b_prop;
 
+
+    
     // Loop over baryons
     for(int baryons = 0; baryons < num_baryons; ++baryons)
     {
@@ -728,8 +729,11 @@ namespace Chroma
 //       SpinMatrix g_tmp1 = 0.5 * (Gamma(2) * g_one  +  timesI(Gamma(1) * g_one));
 //       return SpinMatrix(Gamma(10) * g_tmp1);
 //     }
-	b_prop = Baryon2PtContractions_3prop::sigma_star_2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3,
-						  T_mixed, BaryonSpinMats::Cgm());
+// this appears to be broken so replace for now
+//	  b_prop = Baryon2PtContractions_3prop::sigma_star_2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3,
+//							   T_mixed, BaryonSpinMats::Cgm());
+	b_prop = Baryon2PtContractions_3prop::sigma0_lambda8_2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3,
+						  T_unpol, Cg5);
 	 break;
 
  //Now do sequential source with fixed operator rather than fixed sink
@@ -809,21 +813,24 @@ namespace Chroma
 
                    
      case 41:
-      //p->n
+       //p->n
               
-      b_prop = Baryon2PtContractions_3prop::p_to_n2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, Tpol, Cg5);
-
-      break;
+       b_prop = Baryon2PtContractions_3prop::p_to_n2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, Tpol, Cg5);
+      
+       break;
               
      case 42:
-     //p->p, u quark unpol
-              
-      b_prop = Baryon2PtContractions_3prop::p_to_p_u2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, T_unpol, Cg5);
-              
+       //p->p, u quark unpol
+       // Note that sigma0 and p_to_p_u are the same up to a factor of 2.      
+       b_prop = Baryon2PtContractions_3prop::p_to_p_u2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, T_unpol, Cg5);
+       //b_prop = Real(2.0)*Baryon2PtContractions_3prop::sigma0_2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, T_unpol, Cg5);
+       break;
+       
      case 43:
      //p->p, u quark unpol
               
-      b_prop = Baryon2PtContractions_3prop::p_to_p_u2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, Tpol, Cg5);
+       //      b_prop = Baryon2PtContractions_3prop::p_to_p_u2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, Tpol, Cg5);
+       b_prop = Real(2.0)*Baryon2PtContractions_3prop::sigma0_2pt(quark_propagator_1, quark_propagator_2, quark_propagator_3, Tpol, Cg5);
               
      break;
           
