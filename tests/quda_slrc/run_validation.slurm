@@ -3,11 +3,12 @@
 #SBATCH --output=quda_slrc_validate_%j.out
 #SBATCH --error=quda_slrc_validate_%j.err
 #SBATCH --time=02:00:00
+#SBATCH --partition=a100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --partition=gpu
-#SBATCH --mem=32G
+#SBATCH --mem=128G
+
 
 # ================================================================
 # QUDA SLRC Solver Validation Job
@@ -29,10 +30,7 @@
 # ---- User Configuration ----
 
 # Path to chroma executable
-CHROMA_BIN="/path/to/chroma"
-
-# Path to gauge configuration
-CONFIG_FILE="/path/to/your/config.lime"
+CHROMA_BIN="/hpcfs/users/a1723834/opt/install/chroma-jlab-devel_qcdsf_quda_nh/bin/chroma"
 
 # Lattice geometry (must match nrow in XML)
 LATT_SIZE="32 32 32 64"
@@ -49,10 +47,13 @@ QUDA_TUNECACHE="${HOME}/quda_tunecache"
 # Environment Setup
 # ================================================================
 
-# Load required modules (adapt to your cluster)
-# module load cuda/12.0
-# module load openmpi/4.1
-# module load chroma
+# Load required modules
+module purge
+module load GCC/12.3.0
+module load CUDA/12.4.1
+module load OpenMPI/4.1.5-GCC-12.3.0
+module load CMake/3.26.3-GCCcore-12.3.0
+module load Python
 
 # QUDA environment
 export QUDA_RESOURCE_PATH="${QUDA_TUNECACHE}"
@@ -63,6 +64,14 @@ export QUDA_TUNE_VERSION_CHECK=0
 # QDP-JIT GPU memory pool (leave room for QUDA)
 export QDP_JIT_GPU_POOL_SIZE=4000
 
+# Chroma environment
+CHROMA_HOME=/hpcfs/users/a1723834/opt/install/chroma-jlab-devel_qcdsf_quda_nh
+QDP_HOME=/hpcfs/users/a1723834/opt/install/qdp-jit-devel
+QUDA_HOME=/hpcfs/users/a1723834/opt/install/quda
+LLVM_HOME=/hpcfs/users/a1723834/opt/install/llvm-13.0.0.src
+export LD_LIBRARY_PATH=${QUDA_HOME}/lib:${CHROMA_HOME}/lib:${QDP_HOME}:${LLVM_HOME}/lib:${LD_LIBRARY_PATH}
+export PATH=${CHROMA_HOME}/bin:${PATH}
+
 # Work directory
 WORKDIR="${SLURM_SUBMIT_DIR}"
 cd "${WORKDIR}"
@@ -72,9 +81,6 @@ cd "${WORKDIR}"
 # ================================================================
 
 INPUT_XML="validate_quda_slrc.xml"
-RUNTIME_XML="validate_quda_slrc_runtime.xml"
-
-sed "s|/path/to/your/config.lime|${CONFIG_FILE}|g" "${INPUT_XML}" > "${RUNTIME_XML}"
 
 echo "================================================================"
 echo "QUDA SLRC Validation Test"
@@ -83,7 +89,6 @@ echo "Date:        $(date)"
 echo "Host:        $(hostname)"
 echo "Job ID:      ${SLURM_JOB_ID}"
 echo "Chroma:      ${CHROMA_BIN}"
-echo "Config:      ${CONFIG_FILE}"
 echo "Lattice:     ${LATT_SIZE}"
 echo "MPI Geom:    ${GEOM}"
 echo "GPU:         ${CUDA_VISIBLE_DEVICES:-auto}"
@@ -98,7 +103,7 @@ echo ""
 echo "Starting Chroma at $(date)..."
 echo ""
 
-srun ${CHROMA_BIN} -i "${RUNTIME_XML}" -geom ${GEOM}
+srun ${CHROMA_BIN} -i "${INPUT_XML}" -geom ${GEOM}
 
 CHROMA_EXIT=$?
 
@@ -161,5 +166,3 @@ echo "================================================================"
 echo "Validation Complete at $(date)"
 echo "================================================================"
 
-# Cleanup runtime XML
-rm -f "${RUNTIME_XML}"

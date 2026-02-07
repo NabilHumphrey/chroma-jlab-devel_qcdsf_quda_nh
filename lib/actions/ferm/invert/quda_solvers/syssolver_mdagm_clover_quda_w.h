@@ -382,6 +382,19 @@ public:
 #endif
 
 
+		// Autotuning
+		if( invParam.tuneDslashP ) {
+			QDPIO::cout << "Enabling Dslash Autotuning" << std::endl;
+
+			quda_inv_param.tune = QUDA_TUNE_YES;
+		}
+		else {
+			QDPIO::cout << "Disabling Dslash Autotuning" << std::endl;
+
+			quda_inv_param.tune = QUDA_TUNE_NO;
+		}
+
+
 		// Setup padding
 		multi1d<int> face_size(4);
 		face_size[0] = latdims[1]*latdims[2]*latdims[3]/2;

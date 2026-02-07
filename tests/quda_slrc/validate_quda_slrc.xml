@@ -46,7 +46,7 @@
                         <version>3</version>
                         <SourceType>SHELL_SOURCE</SourceType>
                         <j_decay>3</j_decay>
-                        <t_srce>0 0 0 0</t_srce>
+                        <t_srce>0 0 0 48</t_srce>
                         <quark_smear_lastP>false</quark_smear_lastP>
                         <SmearingParam>
                             <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
@@ -394,7 +394,7 @@
 
     <Cfg>
         <cfg_type>SCIDAC</cfg_type>
-        <cfg_file>/path/to/your/config.lime</cfg_file>
+        <cfg_file>/hpcfs/users/a1723834/configs/b5p50kp120900kp120900-32x64/qcdsf.665.00131.lime</cfg_file>
     </Cfg>
 
 </chroma>
