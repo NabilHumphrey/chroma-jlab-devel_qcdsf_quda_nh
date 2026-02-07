@@ -1,0 +1,400 @@
+<?xml version="1.0"?>
+<!--
+  ================================================================
+  QUDA SLRC Solver Validation Test
+  ================================================================
+
+  Implements validation Levels 1-3 from the integration guide:
+
+  Level 1 (Chroma-side residual check):
+    Built into the QUDA_SLRC_CLOVER_INVERTER. Automatically verifies
+    that the QUDA solution satisfies the Chroma SLRC operator.
+
+  Level 2 (Propagator comparison):
+    Computes the same propagator with:
+      (a) BiCGStab (known-good reference) at 1e-14
+      (b) QUDA SLRC direct solver (double precision, no MG) at 1e-14
+    Both use UNPRECONDITIONED_SLRC with SLIC_FERM_STATE.
+    Pion correlators are computed from each and compared externally.
+
+  Level 3 (Correlator comparison):
+    Compare the pion correlator outputs from the two propagators.
+    Expected agreement: ~1e-12 or better at all timeslices.
+
+  INSTRUCTIONS:
+    1. Replace LATTICE_SIZE, KAPPA, CLOVER, SOURCE_POS, and CONFIG_FILE
+       with your actual values before running.
+    2. Run: mpirun -np N chroma -i validate_quda_slrc.xml -geom X Y Z T
+    3. Check log output for Chroma-side residual (Level 1)
+    4. Run: python compare_correlators.py ref_hadspec.xml quda_hadspec.xml
+-->
+
+<chroma>
+    <Param>
+        <InlineMeasurements>
+
+            <!-- ============================================================ -->
+            <!-- SOURCE                                                        -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>MAKE_SOURCE</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>6</version>
+                    <Source>
+                        <version>3</version>
+                        <SourceType>SHELL_SOURCE</SourceType>
+                        <j_decay>3</j_decay>
+                        <t_srce>0 0 0 0</t_srce>
+                        <quark_smear_lastP>false</quark_smear_lastP>
+                        <SmearingParam>
+                            <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                            <wvf_param>0.21</wvf_param>
+                            <wvfIntPar>75</wvfIntPar>
+                            <no_smear_dir>3</no_smear_dir>
+                        </SmearingParam>
+                        <Displacement>
+                            <version>1</version>
+                            <DisplacementType>NONE</DisplacementType>
+                        </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Source>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- REFERENCE PROPAGATOR (BiCGStab - known good)                  -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Reference propagator (BiCGStab, double precision)</annotation>
+                <Name>PROPAGATOR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>10</version>
+                    <quarkSpinType>FULL</quarkSpinType>
+                    <obsvP>false</obsvP>
+                    <numRetries>1</numRetries>
+                    <FermionAction>
+                        <FermAct>UNPRECONDITIONED_SLRC</FermAct>
+                        <Kappa>0.120900</Kappa>
+                        <clovCoeff>2.65</clovCoeff>
+                        <FermState>
+                            <Name>SLIC_FERM_STATE</Name>
+                            <n_smear>1</n_smear>
+                            <rho>0.1</rho>
+                            <orthog_dir>5</orthog_dir>
+                            <FermionBC>
+                                <FermBC>SIMPLE_FERMBC</FermBC>
+                                <boundary>1 1 1 -1</boundary>
+                            </FermionBC>
+                        </FermState>
+                    </FermionAction>
+                    <InvertParam>
+                        <invType>BICGSTAB_INVERTER</invType>
+                        <RsdBiCGStab>1.0e-14</RsdBiCGStab>
+                        <MaxBiCGStab>50000</MaxBiCGStab>
+                        <MROver>1.1</MROver>
+                    </InvertParam>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                    <prop_id>prop_reference</prop_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- TEST PROPAGATOR (QUDA SLRC, double precision, no MG)          -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Test propagator (QUDA SLRC direct solver, double precision)</annotation>
+                <Name>PROPAGATOR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>10</version>
+                    <quarkSpinType>FULL</quarkSpinType>
+                    <obsvP>false</obsvP>
+                    <numRetries>1</numRetries>
+                    <FermionAction>
+                        <FermAct>UNPRECONDITIONED_SLRC</FermAct>
+                        <Kappa>0.120900</Kappa>
+                        <clovCoeff>2.65</clovCoeff>
+                        <FermState>
+                            <Name>SLIC_FERM_STATE</Name>
+                            <n_smear>1</n_smear>
+                            <rho>0.1</rho>
+                            <orthog_dir>5</orthog_dir>
+                            <FermionBC>
+                                <FermBC>SIMPLE_FERMBC</FermBC>
+                                <boundary>1 1 1 -1</boundary>
+                            </FermionBC>
+                        </FermState>
+                    </FermionAction>
+                    <InvertParam>
+                        <invType>QUDA_SLRC_CLOVER_INVERTER</invType>
+                        <CloverParams>
+                            <Kappa>0.120900</Kappa>
+                            <clovCoeff>2.65</clovCoeff>
+                            <AnisoParam>
+                                <anisoP>false</anisoP>
+                                <t_dir>3</t_dir>
+                                <xi_0>1</xi_0>
+                                <nu>1</nu>
+                            </AnisoParam>
+                        </CloverParams>
+                        <MaxIter>50000</MaxIter>
+                        <RsdTarget>1.0e-14</RsdTarget>
+                        <Delta>1.0e-1</Delta>
+                        <SolverType>GCR</SolverType>
+                        <AntiPeriodicT>true</AntiPeriodicT>
+                        <Verbose>true</Verbose>
+                        <Pipeline>8</Pipeline>
+                        <SubspaceID>dummy_not_used</SubspaceID>
+
+                        <!-- Full double precision for clean comparison -->
+                        <CudaPrecision>DOUBLE</CudaPrecision>
+                        <CudaSloppyPrecision>DOUBLE</CudaSloppyPrecision>
+                        <CudaReconstruct>RECONS_NONE</CudaReconstruct>
+                        <CudaSloppyReconstruct>RECONS_NONE</CudaSloppyReconstruct>
+
+                        <AxialGaugeFix>false</AxialGaugeFix>
+                        <AutotuneDslash>true</AutotuneDslash>
+                        <SilentFail>false</SilentFail>
+                        <RsdToleranceFactor>10</RsdToleranceFactor>
+                        <SolutionCheckP>true</SolutionCheckP>
+
+                        <!-- No multigrid for this test -->
+                    </InvertParam>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                    <prop_id>prop_quda</prop_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- SINK SMEAR REFERENCE PROPAGATOR                               -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>SINK_SMEAR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>5</version>
+                    <Sink>
+                        <version>2</version>
+                        <SinkType>SHELL_SINK</SinkType>
+                        <j_decay>3</j_decay>
+                        <SmearingParam>
+                            <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                            <wvf_param>0.21</wvf_param>
+                            <wvfIntPar>75</wvfIntPar>
+                            <no_smear_dir>3</no_smear_dir>
+                        </SmearingParam>
+                        <Displacement>
+                            <version>1</version>
+                            <DisplacementType>NONE</DisplacementType>
+                        </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Sink>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <prop_id>prop_reference</prop_id>
+                    <smeared_prop_id>prop_reference_sm</smeared_prop_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- SINK SMEAR QUDA PROPAGATOR                                    -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>SINK_SMEAR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>5</version>
+                    <Sink>
+                        <version>2</version>
+                        <SinkType>SHELL_SINK</SinkType>
+                        <j_decay>3</j_decay>
+                        <SmearingParam>
+                            <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                            <wvf_param>0.21</wvf_param>
+                            <wvfIntPar>75</wvfIntPar>
+                            <no_smear_dir>3</no_smear_dir>
+                        </SmearingParam>
+                        <Displacement>
+                            <version>1</version>
+                            <DisplacementType>NONE</DisplacementType>
+                        </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Sink>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <prop_id>prop_quda</prop_id>
+                    <smeared_prop_id>prop_quda_sm</smeared_prop_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- CORRELATORS FROM REFERENCE PROPAGATOR                         -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Hadron spectrum from reference (BiCGStab) propagator</annotation>
+                <Name>HADRON_SPECTRUM</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>1</version>
+                    <MesijP>true</MesijP>
+                    <MesPP>true</MesPP>
+                    <MesPAP>true</MesPAP>
+                    <MesA0PP>true</MesA0PP>
+                    <MesA0PBP>true</MesA0PBP>
+                    <MesA0A0P>true</MesA0A0P>
+                    <BarNuclP>true</BarNuclP>
+                    <BarNuclUP>true</BarNuclUP>
+                    <BarDeltaP>true</BarDeltaP>
+                    <BarDeltaUP>true</BarDeltaUP>
+                    <time_rev>false</time_rev>
+                    <mom2_max>0</mom2_max>
+                    <avg_equiv_mom>true</avg_equiv_mom>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <sink_pairs>
+                        <elem>
+                            <first_id>prop_reference_sm</first_id>
+                            <second_id>prop_reference_sm</second_id>
+                        </elem>
+                    </sink_pairs>
+                </NamedObject>
+                <xml_file>ref_hadspec.xml</xml_file>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- CORRELATORS FROM QUDA PROPAGATOR                              -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Hadron spectrum from QUDA SLRC propagator</annotation>
+                <Name>HADRON_SPECTRUM</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>1</version>
+                    <MesPP>true</MesPP>
+                    <MesPAP>true</MesPAP>
+                    <MesijP>true</MesijP>
+                    <MesA0PP>true</MesA0PP>
+                    <MesA0PBP>true</MesA0PBP>
+                    <MesA0A0P>true</MesA0A0P>
+                    <BarNuclP>true</BarNuclP>
+                    <BarNuclUP>true</BarNuclUP>
+                    <BarDeltaP>true</BarDeltaP>
+                    <BarDeltaUP>true</BarDeltaUP>
+                    <time_rev>false</time_rev>
+                    <mom2_max>0</mom2_max>
+                    <avg_equiv_mom>true</avg_equiv_mom>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <sink_pairs>
+                        <elem>
+                            <first_id>prop_quda_sm</first_id>
+                            <second_id>prop_quda_sm</second_id>
+                        </elem>
+                    </sink_pairs>
+                </NamedObject>
+                <xml_file>quda_hadspec.xml</xml_file>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- CLEANUP                                                       -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>sh_source_1</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+            <elem>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop_reference</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+            <elem>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop_quda</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+            <elem>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop_reference_sm</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+            <elem>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop_quda_sm</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+        </InlineMeasurements>
+        <!-- Lattice size: adjust to your test configuration -->
+        <nrow>32 32 32 64</nrow>
+    </Param>
+
+    <RNG>
+        <Seed>
+            <elem>11</elem>
+            <elem>11</elem>
+            <elem>11</elem>
+            <elem>0</elem>
+        </Seed>
+    </RNG>
+
+    <Cfg>
+        <cfg_type>SCIDAC</cfg_type>
+        <cfg_file>/path/to/your/config.lime</cfg_file>
+    </Cfg>
+
+</chroma>

@@ -102,6 +102,10 @@
 
 // Grab all fermacts to make sure they are registered
 #include "actions/ferm/fermacts/fermacts_aggregate_w.h"
+#include "meas/inline/hadron/inline_deuteron_correlator.h"
+#include "meas/inline/hadron/inline_meson_spectrum_fh.h"
+#include "meas/inline/hadron/inline_baryon_spectrum_fh.h"
+#include "meas/inline/hadron/inline_multi_hadron_fh.h"
 
 namespace Chroma
 {
@@ -235,6 +239,10 @@ namespace Chroma
 
 	registered = true;
       }
+      success &= InlineDeuteronCorrelatorEnv::registerAll();
+      success &= InlineMesonSpectrumFHEnv::registerAll();
+      success &= InlineBaryonSpectrumFHEnv::registerAll();
+      success &= InlineMultiHadronFHEnv::registerAll();
       return success;
     }
 

@@ -6,6 +6,7 @@
 #include "meas/hadron/seqsource_factory_w.h"
 #include "util/ferm/gamma5_herm_w.h"
 #include "util/ft/sftmom.h"
+#include "meas/smear/displace.h"
 
 namespace Chroma 
 {
@@ -341,6 +342,8 @@ namespace Chroma
       sink_mom.resize(Nd-1);
       sink_mom = 0;
       fix_operator = -1;
+      Dmu = -1;
+      Dnu = -1;
     }
 
 
@@ -358,7 +361,13 @@ namespace Chroma
 	break;
               
           case 2:
-          {read(paramtop, "operator", fix_operator);}
+	    {
+	      read(paramtop, "operator", fix_operator);
+	      if(paramtop.count("Dmu") !=0 )
+		read(paramtop, "Dmu", Dmu);
+	      if(paramtop.count("Dnu") !=0 )
+		read(paramtop, "Dnu", Dnu);
+	    }
               break;
 
       default:
@@ -535,7 +544,10 @@ namespace Chroma
           
           LatticePropagator fin;
           int my_operator = getOperator();
+          int my_Dmu = getDmu();
+          int my_Dnu = getDnu();
           bool compute_nonlocal;
+          bool compute_deriv=false;
           int gamma_value;
           int mu;
 	  int opsign=1;
@@ -612,12 +624,23 @@ namespace Chroma
           {
               
               //    LatticePropagator tmp = operator* quark_propagators[0];
-              
-              LatticePropagator tmp = Gamma(gamma_value)*quark_propagators[0];
-              LatticeComplex     ph = conj(phases());
-              fin = tmp * ph;
-	      if ( my_tsink != -1 )
-		  fin = project(fin);
+	    LatticePropagator tmp=quark_propagators[0];
+	    LatticePropagator tmp2;
+	    if (my_Dmu != -1)
+	      {
+		tmp2 = rightNabla( tmp , u , my_Dmu , 1 );
+		tmp=tmp2;
+	      }
+	    if (my_Dnu != -1)
+	      {
+		tmp2 = rightNabla( tmp , u , my_Dnu , 1 );
+		tmp=tmp2;
+	      }
+	    tmp2 = Gamma(gamma_value)*tmp;
+	    LatticeComplex     ph = conj(phases());
+	    fin = tmp2 * ph;
+	    if ( my_tsink != -1 )
+	      fin = project(fin);
           }
           
           END_CODE();

@@ -1,3 +1,4 @@
+// $Id: mom_source_const.cc,v 3.7 2008-11-04 18:43:58 edwards Exp $
 /*! \file
  *  \brief Momentum (wall) source construction
  */
@@ -12,14 +13,14 @@
 namespace Chroma
 {
   // Read parameters
-  void read(XMLReader& xml, const std::string& path, MomWallQuarkSourceConstEnv::Params& param)
+  void read(XMLReader& xml, const string& path, MomWallQuarkSourceConstEnv::Params& param)
   {
     MomWallQuarkSourceConstEnv::Params tmp(xml, path);
     param = tmp;
   }
 
   // Writer
-  void write(XMLWriter& xml, const std::string& path, const MomWallQuarkSourceConstEnv::Params& param)
+  void write(XMLWriter& xml, const string& path, const MomWallQuarkSourceConstEnv::Params& param)
   {
     param.writeXML(xml, path);
   }
@@ -49,6 +50,37 @@ namespace Chroma
 
     // Broadcast to all sites
     a = sitefield;  // QDP (not installed version) now supports   construct OLattice = OScalar
+      
+    END_CODE();
+  }
+
+  //! Fill a specific color and spin index with 1.0 within a volume
+  /*! \ingroup sources */
+  void boxfil3d(LatticeFermion& a, int slice, int mu, int color_index, int spin_index)
+  {
+    START_CODE();
+
+    if (color_index >= Nc || color_index < 0)
+      QDP_error_exit("invalid color index", color_index);
+
+    if (spin_index >= Ns || spin_index < 0)
+      QDP_error_exit("invalid spin index", spin_index);
+
+    // Write ONE to all field
+    Real one = 1;
+    Complex sitecomp = cmplx(one,0);
+    ColorVector sitecolor = zero;
+    Fermion sitefield = zero;
+
+    pokeSpin(sitefield,
+	     pokeColor(sitecolor,sitecomp,color_index),
+	     spin_index);
+
+    // Broadcast to all sites
+    LatticeFermion tmp;
+    tmp = sitefield;  // QDP (not installed version) now supports   construct OLattice = OScalar
+
+    a = where(Layout::latticeCoordinate(mu) == slice, tmp, LatticeFermion(zero));
       
     END_CODE();
   }
@@ -98,7 +130,7 @@ namespace Chroma
 
 
     //! Read parameters
-    Params::Params(XMLReader& xml, const std::string& path)
+    Params::Params(XMLReader& xml, const string& path)
     {
       XMLReader paramtop(xml, path);
 
@@ -112,7 +144,7 @@ namespace Chroma
 
       default:
 	QDPIO::cerr << __func__ << ": parameter version " << version 
-		    << " unsupported." << std::endl;
+		    << " unsupported." << endl;
 	QDP_abort(1);
       }
 
@@ -121,16 +153,16 @@ namespace Chroma
       read(paramtop, "av_mom", av_mom) ;
       read(paramtop, "mom", mom);
 
-      if (mom.size() != Nd)
+      if ( (mom.size() != Nd) && (mom.size() != Nd-1) )
       {
-	QDPIO::cerr << name << ": wrong size of mom array: expected length=" << Nd << std::endl;
+	QDPIO::cerr << name << ": wrong size of mom array: expected length=" << Nd <<" or "<<Nd-1<< endl;
 	QDP_abort(1);
       }
     }
 
 
     // Writer
-    void Params::writeXML(XMLWriter& xml, const std::string& path) const
+    void Params::writeXML(XMLWriter& xml, const string& path) const
     {
       push(xml, path);
 
@@ -151,7 +183,7 @@ namespace Chroma
     LatticePropagator
     SourceConst<LatticePropagator>::operator()(const multi1d<LatticeColorMatrix>& u) const
     {
-      QDPIO::cout << "Volume Momentum Source" << std::endl;
+      QDPIO::cout << "Volume Momentum Source" << endl;
 
       LatticeComplex phase ;
       // Initialize the slow Fourier transform phases
@@ -164,8 +196,16 @@ namespace Chroma
 	//just get one momentum. the one we want!
 	SftMom phases(0, params.t_srce, mom3, params.av_mom, params.j_decay);
 	mom3 = phases.canonicalOrder(mom3);
-	Real fact = twopi * Real(params.mom[params.j_decay]) / Real(Layout::lattSize()[params.j_decay]);
-	phase = cos( fact * QDP::Layout::latticeCoordinate(params.j_decay) );
+	if (params.mom.size()==Nd)
+	  {
+	    Real fact = twopi * Real(params.mom[params.j_decay]) / Real(Layout::lattSize()[params.j_decay]);
+	    phase = cos(QDP::Layout::latticeCoordinate(params.j_decay)*fact) ;
+	  }
+	else
+	  {
+	    Real fact = zero;
+	    phase = cos(QDP::Layout::latticeCoordinate(params.j_decay)*fact) ;
+	  }
 	/**
 	for (int sink_mom_num=0; sink_mom_num < phases.numMom(); ++sink_mom_num){
 	  multi1d<int> mom = phases.canonicalOrder(phases.numToMom(sink_mom_num));
@@ -175,14 +215,17 @@ namespace Chroma
 	phase *= phases[0];
 	multi1d<int> mom = phases.canonicalOrder(phases.numToMom(0));
 	QDPIO::cout<<"Source momentum (averaged over equivalent momenta): " ;
-	QDPIO::cout<<mom[0]<<mom[1]<<mom[2]<<std::endl;
+	QDPIO::cout<<mom[0]<<mom[1]<<mom[2]<<endl;
       }
       else{ // do not use momentum averaged sources
 	SftMom phases(0, params.t_srce, params.mom);
 	phase = phases[0] ;
 	multi1d<int> mom = phases.numToMom(0) ;
 	QDPIO::cout<<"Source momentum: " ;
-	QDPIO::cout<<mom[0]<<mom[1]<<mom[2]<<mom[3]<<std::endl;
+	if (mom.size()==Nd)
+	  QDPIO::cout<<mom[0]<<mom[1]<<mom[2]<<mom[3]<<endl;
+	else
+	  QDPIO::cout<<mom[0]<<mom[1]<<mom[2]<<endl;
       }
 
       // Create the quark source
@@ -193,7 +236,13 @@ namespace Chroma
 	{
 	  // MomWall fill a fermion source. Insert it into the propagator source
 	  LatticeFermion chi;
-	  boxfil(chi, color_source, spin_source);
+	  if (params.mom.size()==Nd)
+	    boxfil(chi, color_source, spin_source);
+	  else
+	    {
+	    boxfil3d(chi, params.t_srce[params.j_decay], params.j_decay, color_source, spin_source);
+	    QDPIO::cout<<"using 3d volume"<<endl;
+	    }
 	  // Multiply in the time direction phases (not handled in sftmom)
 	  chi *= phase;
 	  FermToProp(chi, quark_source, color_source, spin_source);

@@ -30,6 +30,8 @@ namespace Chroma
       int              t_sink;          /*!< time slice of sink */
       int              j_decay;         /*!< Decay direction */
       int              fix_operator;
+      int              Dmu;
+      int              Dnu;
     };
 
 
@@ -197,6 +199,8 @@ namespace Chroma
           
           //! Get fix_operator
           const int getOperator() const {return params.fix_operator;}
+          const int getDmu() const {return params.Dmu;}
+          const int getDnu() const {return params.Dnu;}
           
       private:
           //! Hide partial constructor

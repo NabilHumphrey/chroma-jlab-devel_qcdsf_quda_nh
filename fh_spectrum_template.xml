@@ -1,0 +1,601 @@
+<?xml version="1.0"?>
+<!--
+  ================================================================
+  FEYNMAN-HELLMANN SPECTRUM WORKFLOW TEMPLATE
+  ================================================================
+
+  Complete workflow for computing Feynman-Hellmann correlators:
+  1. Create smeared source
+  2. Compute standard (unperturbed) propagator
+  3. Sink smear and save standard propagator
+  4. Compute FH (perturbed) propagator using UNPREC_SLRC_FEYNHELL
+  5. Sink smear and save FH propagator
+  6. Compute single-hadron spectra (mesons, baryons)
+  7. Compute multi-hadron spectra (deuteron, di-rho, etc.)
+  8. Clean up named objects
+
+  Template variables (replace before running):
+    {{SX}}, {{SY}}, {{SZ}}, {{ST}} - Source location
+    {{NX}}, {{NT}} - Lattice dimensions
+    {{CONF}} - Gauge configuration file path
+    {{LAMBRE1}}, {{LAMBIM1}} - FH lambda parameter (real/imag)
+    {{MU}} - Gamma matrix for operator (8 = gamma_4)
+    {{PX}}, {{PY}}, {{PZ}} - Insertion momentum
+    {{KAPPA}} - Kappa value
+    {{CLOVER}} - Clover coefficient
+-->
+
+<chroma>
+    <Param>
+        <InlineMeasurements>
+
+            <!-- ============================================================ -->
+            <!-- STEP 1: CREATE SMEARED SOURCE                                -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>MAKE_SOURCE</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>6</version>
+                    <Source>
+                    <version>3</version>
+                    <SourceType>SHELL_SOURCE</SourceType>
+                    <j_decay>3</j_decay>
+                    <t_srce>{{SX}} {{SY}} {{SZ}} {{ST}}</t_srce>
+                    <quark_smear_lastP>false</quark_smear_lastP>
+                    <SmearingParam>
+                        <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                        <wvf_param>0.21</wvf_param>
+                        <wvfIntPar>75</wvfIntPar>
+                        <no_smear_dir>3</no_smear_dir>
+                    </SmearingParam>
+                    <Displacement>
+                        <version>1</version>
+                        <DisplacementType>NONE</DisplacementType>
+                    </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Source>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 2: COMPUTE UNPERTURBED PROPAGATOR                       -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>PROPAGATOR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>10</version>
+                    <quarkSpinType>FULL</quarkSpinType>
+                    <obsvP>false</obsvP>
+                    <numRetries>1</numRetries>
+                    <FermionAction>
+                        <FermAct>UNPRECONDITIONED_SLRC</FermAct>
+                        <Kappa>{{KAPPA}}</Kappa>
+                        <clovCoeff>{{CLOVER}}</clovCoeff>
+                        <FermState>
+                            <Name>SLIC_FERM_STATE</Name>
+                            <n_smear>1</n_smear>
+                            <rho>0.1</rho>
+                            <orthog_dir>5</orthog_dir>
+                            <FermionBC>
+                            <FermBC>SIMPLE_FERMBC</FermBC>
+                                <boundary>1 1 1 -1</boundary>
+                            </FermionBC>
+                        </FermState>
+                    </FermionAction>
+                    <InvertParam>
+                        <invType>BICGSTAB_INVERTER</invType>
+                        <RsdBiCGStab>1.0e-12</RsdBiCGStab>
+                        <MaxBiCGStab>20000</MaxBiCGStab>
+                        <MROver>1.1</MROver>
+                    </InvertParam>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                    <prop_id>prop</prop_id>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 3: SINK SMEAR UNPERTURBED PROPAGATOR                    -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>SINK_SMEAR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>5</version>
+                    <Sink>
+                    <version>2</version>
+                    <SinkType>SHELL_SINK</SinkType>
+                    <j_decay>3</j_decay>
+                    <SmearingParam>
+                        <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                        <wvf_param>0.21</wvf_param>
+                        <wvfIntPar>75</wvfIntPar>
+                        <no_smear_dir>3</no_smear_dir>
+                    </SmearingParam>
+                    <Displacement>
+                        <version>1</version>
+                        <DisplacementType>NONE</DisplacementType>
+                    </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Sink>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <prop_id>prop</prop_id>
+                    <smeared_prop_id>prop_smeared_sink</smeared_prop_id>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 4: COMPUTE FH (PERTURBED) PROPAGATOR                    -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Feynman-Hellmann perturbed propagator</annotation>
+                <Name>PROPAGATOR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>10</version>
+                    <quarkSpinType>FULL</quarkSpinType>
+                    <obsvP>false</obsvP>
+                    <numRetries>1</numRetries>
+                    <FermionAction>
+                        <FermAct>UNPREC_SLRC_FEYNHELL</FermAct>
+                        <Kappa>{{KAPPA}}</Kappa>
+                        <FeynHellParam>
+                            <elem>
+                                <LambdaReal>{{LAMBRE1}}</LambdaReal>
+                                <LambdaImag>{{LAMBIM1}}</LambdaImag>
+                                <Operator>{{MU}}</Operator>
+                                <Momentum>{{PX}} {{PY}} {{PZ}} </Momentum>
+                                <Source>{{SX}} {{SY}} {{SZ}} {{ST}}</Source>
+                                <NoiseReal>1.0</NoiseReal>
+                                <NoiseImag>0.0</NoiseImag>
+                            </elem>
+                        </FeynHellParam>
+                        <clovCoeff>{{CLOVER}}</clovCoeff>
+                        <FermState>
+                            <Name>SLIC_FERM_STATE</Name>
+                            <n_smear>1</n_smear>
+                            <rho>0.1</rho>
+                            <orthog_dir>5</orthog_dir>
+                            <FermionBC>
+                            <FermBC>SIMPLE_FERMBC</FermBC>
+                                <boundary>1 1 1 -1</boundary>
+                            </FermionBC>
+                        </FermState>
+                    </FermionAction>
+                    <InvertParam>
+                        <invType>BICGSTAB_INVERTER</invType>
+                        <RsdBiCGStab>1.0e-12</RsdBiCGStab>
+                        <MaxBiCGStab>20000</MaxBiCGStab>
+                        <MROver>1.1</MROver>
+                    </InvertParam>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <source_id>sh_source_1</source_id>
+                    <prop_id>fh_prop</prop_id>
+                    <initial_guess_id>prop</initial_guess_id>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- STEP 5: DELETE SOURCE &                                      -->
+            <!--         UNSMEARED UNPERTURBED PROP TO FREE MEMORY            -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Delete the unperturbed prop</annotation>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- STEP 6: SINK SMEAR FH PROPAGATOR                             -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>SINK_SMEAR</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <version>5</version>
+                    <Sink>
+                    <version>2</version>
+                    <SinkType>SHELL_SINK</SinkType>
+                    <j_decay>3</j_decay>
+                    <SmearingParam>
+                        <wvf_kind>GAUGE_INV_JACOBI</wvf_kind>
+                        <wvf_param>0.21</wvf_param>
+                        <wvfIntPar>75</wvfIntPar>
+                        <no_smear_dir>3</no_smear_dir>
+                    </SmearingParam>
+                    <Displacement>
+                        <version>1</version>
+                        <DisplacementType>NONE</DisplacementType>
+                    </Displacement>
+                        <LinkSmearing>
+                            <LinkSmearingType>STOUT_SMEAR</LinkSmearingType>
+                            <link_smear_fact>0.1</link_smear_fact>
+                            <link_smear_num>2</link_smear_num>
+                            <no_smear_dir>3</no_smear_dir>
+                        </LinkSmearing>
+                    </Sink>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <prop_id>fh_prop</prop_id>
+                    <smeared_prop_id>fh_prop_smeared_sink</smeared_prop_id>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 7: DELETE UNSMEARED FH PROP TO FREE MEMORY              -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Delete the FH prop</annotation>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>fh_prop</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+            <!-- ============================================================ -->
+            <!-- STEP 8: MESON SPECTRUM (rho_x, rho_y, rho_z, pion)          -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>MESON_SPECTRUM_FH</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <mom2_max>4</mom2_max>
+                    <avg_equiv_mom>true</avg_equiv_mom>
+                    <t0>{{ST}}</t0>
+
+                    <mesons>
+                        <elem>
+                            <name>rho_x</name>
+                            <gamma>1</gamma>
+                        </elem>
+                        <elem>
+                            <name>rho_y</name>
+                            <gamma>2</gamma>
+                        </elem>
+                        <elem>
+                            <name>rho_z</name>
+                            <gamma>4</gamma>
+                        </elem>
+                        <elem>
+                            <name>pion</name>
+                            <gamma>15</gamma>
+                        </elem>
+                    </mesons>
+
+                    <contractions>
+                        <elem>
+                            <quark_is_perturbed>false</quark_is_perturbed>
+                            <antiquark_is_perturbed>false</antiquark_is_perturbed>
+                            <label>unperturbed</label>
+                        </elem>
+                        <elem>
+                            <quark_is_perturbed>true</quark_is_perturbed>
+                            <antiquark_is_perturbed>false</antiquark_is_perturbed>
+                            <label>quark_perturbed</label>
+                        </elem>
+                        <elem>
+                            <quark_is_perturbed>false</quark_is_perturbed>
+                            <antiquark_is_perturbed>true</antiquark_is_perturbed>
+                            <label>antiquark_perturbed</label>
+                        </elem>
+                        <elem>
+                            <quark_is_perturbed>true</quark_is_perturbed>
+                            <antiquark_is_perturbed>true</antiquark_is_perturbed>
+                            <label>both_perturbed</label>
+                        </elem>
+                    </contractions>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <perturbed_prop_id>fh_prop_smeared_sink</perturbed_prop_id>
+                    <unperturbed_prop_id>prop_smeared_sink</unperturbed_prop_id>
+                    <output_file>{{MESON_OUT}}</output_file>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 9: BARYON SPECTRUM (proton, neutron)                    -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>BARYON_SPECTRUM_FH</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <mom2_max>4</mom2_max>
+                    <avg_equiv_mom>true</avg_equiv_mom>
+                    <t0>{{ST}}</t0>
+
+                    <baryons>
+                        <elem>
+                            <name>proton</name>
+                            <type>PROTON</type>
+                            <parity>PLUS</parity>
+                        </elem>
+                        <elem>
+                            <name>proton_neg</name>
+                            <type>PROTON</type>
+                            <parity>MINUS</parity>
+                        </elem>
+                        <elem>
+                            <name>neutron</name>
+                            <type>NEUTRON</type>
+                            <parity>PLUS</parity>
+                        </elem>
+                    </baryons>
+
+                    <contractions>
+                        <elem>
+                            <up_is_perturbed>false</up_is_perturbed>
+                            <down_is_perturbed>false</down_is_perturbed>
+                            <label>unperturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>true</up_is_perturbed>
+                            <down_is_perturbed>false</down_is_perturbed>
+                            <label>up_perturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>false</up_is_perturbed>
+                            <down_is_perturbed>true</down_is_perturbed>
+                            <label>down_perturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>true</up_is_perturbed>
+                            <down_is_perturbed>true</down_is_perturbed>
+                            <label>both_perturbed</label>
+                        </elem>
+                    </contractions>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <perturbed_prop_id>fh_prop_smeared_sink</perturbed_prop_id>
+                    <unperturbed_prop_id>prop_smeared_sink</unperturbed_prop_id>
+                    <output_file>{{BARYON_OUT}}</output_file>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 10: MULTI-HADRON SPECTRUM (deuteron, di-rho, etc.)     -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <Name>MULTI_HADRON_FH</Name>
+                <Frequency>1</Frequency>
+                <Param>
+                    <mom2_max>4</mom2_max>
+                    <avg_equiv_mom>true</avg_equiv_mom>
+                    <t0>{{ST}}</t0>
+
+                    <states>
+                        <!-- Dibaryons -->
+                        <elem>
+                            <name>deuteron</name>
+                            <type>DIBARYON</type>
+                            <hadron1>PROTON</hadron1>
+                            <hadron2>NEUTRON</hadron2>
+                            <total_spin>1</total_spin>
+                        </elem>
+                        <elem>
+                            <name>pp_dibaryon</name>
+                            <type>DIBARYON</type>
+                            <hadron1>PROTON</hadron1>
+                            <hadron2>PROTON</hadron2>
+                            <total_spin>1</total_spin>
+                        </elem>
+                        <elem>
+                            <name>nn_dibaryon</name>
+                            <type>DIBARYON</type>
+                            <hadron1>NEUTRON</hadron1>
+                            <hadron2>NEUTRON</hadron2>
+                            <total_spin>1</total_spin>
+                        </elem>
+                        <elem>
+                            <name>pn_singlet</name>
+                            <type>DIBARYON</type>
+                            <hadron1>PROTON</hadron1>
+                            <hadron2>NEUTRON</hadron2>
+                            <total_spin>0</total_spin>
+                        </elem>
+
+                        <!-- Di-rho (vector-vector) -->
+                        <elem>
+                            <name>dirho_S1</name>
+                            <type>DIMESON</type>
+                            <hadron1>RHO</hadron1>
+                            <hadron2>RHO</hadron2>
+                            <total_spin>1</total_spin>
+                        </elem>
+                        <elem>
+                            <name>dirho_S0</name>
+                            <type>DIMESON</type>
+                            <hadron1>RHO</hadron1>
+                            <hadron2>RHO</hadron2>
+                            <total_spin>0</total_spin>
+                        </elem>
+                        <elem>
+                            <name>dirho_S2</name>
+                            <type>DIMESON</type>
+                            <hadron1>RHO</hadron1>
+                            <hadron2>RHO</hadron2>
+                            <total_spin>2</total_spin>
+                        </elem>
+                    </states>
+
+                    <contractions>
+                        <elem>
+                            <up_is_perturbed>false</up_is_perturbed>
+                            <down_is_perturbed>false</down_is_perturbed>
+                            <label>unperturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>true</up_is_perturbed>
+                            <down_is_perturbed>false</down_is_perturbed>
+                            <label>up_perturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>false</up_is_perturbed>
+                            <down_is_perturbed>true</down_is_perturbed>
+                            <label>down_perturbed</label>
+                        </elem>
+                        <elem>
+                            <up_is_perturbed>true</up_is_perturbed>
+                            <down_is_perturbed>true</down_is_perturbed>
+                            <label>both_perturbed</label>
+                        </elem>
+                    </contractions>
+                </Param>
+                <NamedObject>
+                    <gauge_id>default_gauge_field</gauge_id>
+                    <perturbed_prop_id>fh_prop_smeared_sink</perturbed_prop_id>
+                    <unperturbed_prop_id>prop_smeared_sink</unperturbed_prop_id>
+                    <output_file>{{MULTIHADRON_OUT}}</output_file>
+                </NamedObject>
+            </elem>
+
+
+            <!-- ============================================================ -->
+            <!-- STEP 11: CLEANUP - DELETE REMAINING NAMED OBJECTS            -->
+            <!-- ============================================================ -->
+
+            <elem>
+                <annotation>Delete the source</annotation>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>sh_source_1</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+            <elem>
+                <annotation>Delete the smeared unperturbed prop</annotation>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>prop_smeared_sink</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+            <elem>
+                <annotation>Delete the smeared FH prop</annotation>
+                <Name>ERASE_NAMED_OBJECT</Name>
+                <Frequency>1</Frequency>
+                <NamedObject>
+                    <object_id>fh_prop_smeared_sink</object_id>
+                    <object_type>LatticePropagator</object_type>
+                </NamedObject>
+            </elem>
+
+        </InlineMeasurements>
+        <nrow>{{NX}} {{NX}} {{NX}} {{NT}}</nrow>
+    </Param>
+
+    <RNG>
+        <Seed>
+            <elem>11</elem>
+            <elem>11</elem>
+            <elem>11</elem>
+            <elem>0</elem>
+        </Seed>
+    </RNG>
+
+    <Cfg>
+        <cfg_type>ILDG</cfg_type>
+        <cfg_file>{{CONF}}</cfg_file>
+    </Cfg>
+
+</chroma>
+
+<!--
+  ================================================================
+  TEMPLATE VARIABLES
+  ================================================================
+
+  Source location:
+    {{SX}}, {{SY}}, {{SZ}}, {{ST}}
+
+  Lattice dimensions:
+    {{NX}}, {{NT}}
+
+  Gauge configuration:
+    {{CONF}}
+
+  Output files:
+    {{MESON_OUT}}      - Meson spectrum output
+    {{BARYON_OUT}}     - Baryon spectrum output
+    {{MULTIHADRON_OUT}} - Multi-hadron spectrum output
+
+  Feynman-Hellmann parameters:
+    {{LAMBRE1}}        - Lambda real part (e.g., 0.025)
+    {{LAMBIM1}}        - Lambda imaginary part (usually 0)
+    {{MU}}             - Gamma matrix (8 = gamma_4 for quark number)
+    {{PX}}, {{PY}}, {{PZ}} - Insertion momentum (usually 0 0 0)
+
+  Fermion action parameters (replace directly):
+    {{KAPPA}}         - Kappa value
+    {{CLOVER}}            - Clover coefficient
+
+  ================================================================
+  OUTPUT FORMAT
+  ================================================================
+
+  For spin-1 states, individual M-state correlators are output:
+    state_m+1, state_m0, state_m-1
+
+  Tensor polarization (b1): C(M=0) - 0.5*[C(M+1) + C(M-1)]
+  Vector polarization (g1): C(M+1) - C(M-1)
+
+  ================================================================
+  GAMMA MATRIX ENCODING
+  ================================================================
+
+  gamma_1 = 1    (x-direction)
+  gamma_2 = 2    (y-direction)
+  gamma_3 = 4    (z-direction)
+  gamma_4 = 8    (time / quark number operator)
+  gamma_5 = 15
+-->
