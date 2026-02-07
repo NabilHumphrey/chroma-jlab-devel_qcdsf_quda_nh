@@ -95,7 +95,7 @@ namespace Chroma
 
     QDPIO::cout << "QUDA_"<<solver_string<<"_WILSON_SOLVER: Total Time (incl. load gauge)=" << swatch1.getTimeInSeconds() <<" s"<<std::endl;
 
-    ret.n_count =quda_inv_param.iter[0];
+    ret.n_count =quda_inv_param.iter;
 
     return ret;
 
