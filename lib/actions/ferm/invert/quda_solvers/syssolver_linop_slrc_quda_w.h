@@ -620,11 +620,31 @@ namespace Chroma
 
 			psi = zero; // Zero initial guess
 
+			// ========================================
+			// Prepare Schur complement source
+			// ========================================
+			// QUDA with MATPC_SOLUTION expects the preconditioned source:
+			//   b_hat_o = chi_o - M_oe M_ee^{-1} chi_e
+			// where M_ee = A_ee (clover from thin links), M_oe uses fat links.
+			// We compute M_oe M_ee^{-1} chi_e by:
+			//   1) Apply A_ee^{-1} to even sites of chi
+			//   2) Apply full operator A to get M_oe on odd sites
+			T mod_chi;
+			{
+				T tmp1;
+				tmp1 = zero;
+				invclov->apply(tmp1, chi, PLUS, 0); // tmp1[rb[0]] = A_ee^{-1} chi_e
+				// tmp1[rb[1]] = 0, so (*A)(tmp2, tmp1) gives tmp2[rb[1]] = M_oe * tmp1[rb[0]]
+				T tmp2;
+				(*A)(tmp2, tmp1, PLUS);
+				mod_chi[rb[1]] = chi - tmp2; // b_hat_o = chi_o - M_oe M_ee^{-1} chi_e
+			}
+
 			if ( invParam.axialGaugeP ) {
 				T g_chi, g_psi;
 
 				// Gauge Fix source and initial guess
-				g_chi[ rb[1] ] = GFixMat * chi;
+				g_chi[ rb[1] ] = GFixMat * mod_chi;
 				g_psi[ rb[1] ] = GFixMat * psi;
 				res = qudaInvert(*clov,
 						*invclov,
@@ -635,7 +655,7 @@ namespace Chroma
 			else {
 				res = qudaInvert(*clov,
 						*invclov,
-						chi,
+						mod_chi,
 						psi);
 			}
 
