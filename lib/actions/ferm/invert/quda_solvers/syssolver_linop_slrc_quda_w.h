@@ -623,12 +623,17 @@ namespace Chroma
 			// ========================================
 			// Prepare Schur complement source
 			// ========================================
-			// QUDA with MATPC_SOLUTION expects the preconditioned source:
-			//   b_hat_o = chi_o - M_oe M_ee^{-1} chi_e
-			// where M_ee = A_ee (clover from thin links), M_oe uses fat links.
-			// We compute M_oe M_ee^{-1} chi_e by:
+			// QUDA with MATPC_ODD_ODD solves the symmetric Schur complement:
+			//   M_tilde psi_o = b_tilde
+			//   M_tilde = 1 - M_oo^{-1} M_oe M_ee^{-1} M_eo
+			// The source for this from the full system M*psi = chi is:
+			//   b_tilde = M_oo^{-1} (chi_o - M_oe M_ee^{-1} chi_e)
+			//           = A_oo^{-1} (chi_o - M_oe M_ee^{-1} chi_e)
+			// Steps:
 			//   1) Apply A_ee^{-1} to even sites of chi
 			//   2) Apply full operator A to get M_oe on odd sites
+			//   3) Subtract from chi_o to get b_hat = chi_o - M_oe M_ee^{-1} chi_e
+			//   4) Apply A_oo^{-1} to get b_tilde = M_oo^{-1} b_hat
 			T mod_chi;
 			{
 				T tmp1;
@@ -637,7 +642,9 @@ namespace Chroma
 				// tmp1[rb[1]] = 0, so (*A)(tmp2, tmp1) gives tmp2[rb[1]] = M_oe * tmp1[rb[0]]
 				T tmp2;
 				(*A)(tmp2, tmp1, PLUS);
-				mod_chi[rb[1]] = chi - tmp2; // b_hat_o = chi_o - M_oe M_ee^{-1} chi_e
+				T b_hat;
+				b_hat[rb[1]] = chi - tmp2; // b_hat_o = chi_o - M_oe M_ee^{-1} chi_e
+				invclov->apply(mod_chi, b_hat, PLUS, 1); // b_tilde = A_oo^{-1} b_hat
 			}
 
 			if ( invParam.axialGaugeP ) {
