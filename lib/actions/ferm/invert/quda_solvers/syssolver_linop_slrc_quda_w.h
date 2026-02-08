@@ -655,7 +655,7 @@ namespace Chroma
 				rel_resid = res.resid / sqrt(norm2(chi, A->subset()));
 
 				QDPIO::cout << solver_string
-				            << "QUDA  true residual = " << quda_inv_param.true_res[0]
+				            << "QUDA  true residual = " << quda_inv_param.true_res
 				            << std::endl;
 				QDPIO::cout << solver_string
 				            << "Chroma true residual = " << rel_resid

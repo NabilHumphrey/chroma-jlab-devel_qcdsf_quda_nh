@@ -109,7 +109,7 @@ namespace Chroma
     QDPIO::cout << solver_string << "Total Time (incl. load gauge)=" << swatch1.getTimeInSeconds() <<" s"<<std::endl;
 
     ret.n_count =quda_inv_param.iter;
-    ret.resid = quda_inv_param.true_res[0];
+    ret.resid = quda_inv_param.true_res;
     return ret;
 
   }
