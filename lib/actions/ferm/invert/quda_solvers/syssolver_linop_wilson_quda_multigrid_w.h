@@ -357,6 +357,7 @@ public:
 
 
 		q_gauge_param.ga_pad = max_face;
+		quda_inv_param.sp_pad = 0;
 
 		if( invParam.MULTIGRIDParamsP ) {
 			QDPIO::cout << "Setting MULTIGRID solver params" << std::endl;
