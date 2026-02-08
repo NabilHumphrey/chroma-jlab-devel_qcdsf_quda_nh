@@ -134,6 +134,7 @@ namespace Chroma {
 			mg_inv_param.clover_cuda_prec_sloppy = gpu_half_prec;
 			mg_inv_param.clover_cuda_prec_precondition = gpu_half_prec;
 			mg_inv_param.cl_pad = 0;
+			mg_inv_param.sp_pad = 0;
 			mg_inv_param.clover_order = QUDA_PACKED_CLOVER_ORDER;
 			//
 			//Done...
