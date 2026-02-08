@@ -1,6 +1,6 @@
 // -*- C++ -*-
 /*! \file
- *  \brief QUDA solver for UNPRECONDITIONED_SLRC fermion action.
+ *  \brief QUDA solver for SLRC fermion action.
  *
  *  Handles the SLRC decomposition by:
  *  1. Extracting thin (unsmeared) links from SLICFermState for the clover term
@@ -9,6 +9,7 @@
  *  4. Passing the fat links as the gauge field to QUDA
  *  5. Passing the pre-computed clover term to QUDA via loadCloverQuda()
  *
+ *  Uses MATPC_SOLUTION (odd-checkerboard) for QDPJIT compatibility.
  *  Supports multigrid preconditioning with subspace caching.
  */
 
@@ -341,9 +342,9 @@ namespace Chroma
 			quda_inv_param.reliable_delta = toDouble(invParam.Delta);
 			quda_inv_param.pipeline = invParam.Pipeline;
 
-			// SLRC is unpreconditioned: use MAT_SOLUTION for full-field solve
-			// QUDA handles even-odd preconditioning internally
-			quda_inv_param.solution_type = QUDA_MAT_SOLUTION;
+			// Use MATPC_SOLUTION: QUDA solves on odd checkerboard
+			// (required for QDPJIT which doesn't support full-site spinor fields)
+			quda_inv_param.solution_type = QUDA_MATPC_SOLUTION;
 			quda_inv_param.solve_type = QUDA_DIRECT_PC_SOLVE;
 			quda_inv_param.matpc_type = QUDA_MATPC_ODD_ODD;
 
@@ -623,13 +624,13 @@ namespace Chroma
 				T g_chi, g_psi;
 
 				// Gauge Fix source and initial guess
-				g_chi = GFixMat * chi;
-				g_psi = GFixMat * psi;
+				g_chi[ rb[1] ] = GFixMat * chi;
+				g_psi[ rb[1] ] = GFixMat * psi;
 				res = qudaInvert(*clov,
 						*invclov,
 						g_chi,
 						g_psi);
-				psi = adj(GFixMat)*g_psi;
+				psi[ rb[1] ] = adj(GFixMat)*g_psi;
 			}
 			else {
 				res = qudaInvert(*clov,
@@ -639,6 +640,22 @@ namespace Chroma
 			}
 
 			swatch.stop();
+
+			// ========================================
+			// Reconstruct even-site solution
+			// ========================================
+			// QUDA with MATPC_SOLUTION only returns the odd-checkerboard solution.
+			// For the unpreconditioned SLRC operator, reconstruct even sites:
+			//   psi_e = A_ee^{-1} (chi_e - M_eo * psi_o)
+			// where A_ee is clover (thin links), M_eo = -(1/2) D_eo (fat links).
+			// Since psi_e = 0, applying the full operator gives tmp_e = M_eo * psi_o.
+			{
+				T tmp;
+				(*A)(tmp, psi, PLUS);
+				T even_rhs;
+				even_rhs[rb[0]] = chi - tmp;
+				invclov->apply(psi, even_rhs, PLUS, 0);
+			}
 
 			// ========================================
 			// Chroma-side residual verification

@@ -64,12 +64,12 @@ namespace Chroma
 
     SystemSolverResults_t ret;
 
-    // For the unpreconditioned SLRC, we pass full-field spinors
-    // QUDA handles internal even-odd preconditioning via DIRECT_PC_SOLVE + MAT_SOLUTION
+    // MATPC_SOLUTION: pass odd-checkerboard spinors to QUDA
+    // (QDPJIT doesn't support full-site spinor fields)
 
 #ifndef BUILD_QUDA_DEVIFACE_SPINOR
-    void* spinorIn  = (void *)&(chi_s.elem(all.start()).elem(0).elem(0).real());
-    void* spinorOut = (void *)&(psi_s.elem(all.start()).elem(0).elem(0).real());
+    void* spinorIn  = (void *)&(chi_s.elem(rb[1].start()).elem(0).elem(0).real());
+    void* spinorOut = (void *)&(psi_s.elem(rb[1].start()).elem(0).elem(0).real());
 #else
     void* spinorIn;
     void* spinorOut;
