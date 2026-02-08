@@ -133,18 +133,10 @@ namespace Chroma {
 			mg_inv_param.clover_cuda_prec = gpu_prec;
 			mg_inv_param.clover_cuda_prec_sloppy = gpu_half_prec;
 			mg_inv_param.clover_cuda_prec_precondition = gpu_half_prec;
+			mg_inv_param.cl_pad = 0;
 			mg_inv_param.clover_order = QUDA_PACKED_CLOVER_ORDER;
 			//
 			//Done...
-			// Autotuning
-			if( invParam.tuneDslashP ) {
-				QDPIO::cout << "Enabling MG Dslash Autotuning" << std::endl;
-				mg_inv_param.tune = QUDA_TUNE_YES;
-			}
-			else {
-				QDPIO::cout << "Disabling MG Dslash Autotuning" << std::endl;
-				mg_inv_param.tune = QUDA_TUNE_NO;
-			}
 			if( invParam.MULTIGRIDParamsP ) {
 				QDPIO::cout << "Setting MULTIGRID solver params" << std::endl;
 				// Dereference handle

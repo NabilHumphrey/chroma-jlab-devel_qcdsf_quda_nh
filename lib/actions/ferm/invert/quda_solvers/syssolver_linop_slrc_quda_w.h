@@ -368,14 +368,6 @@ namespace Chroma
 			quda_inv_param.output_location = QUDA_CUDA_FIELD_LOCATION;
 #endif
 
-			// Autotuning
-			if( invParam.tuneDslashP ) {
-				quda_inv_param.tune = QUDA_TUNE_YES;
-			}
-			else {
-				quda_inv_param.tune = QUDA_TUNE_NO;
-			}
-
 			// Setup padding
 			multi1d<int> face_size(4);
 			face_size[0] = latdims[1]*latdims[2]*latdims[3]/2;
@@ -396,6 +388,7 @@ namespace Chroma
 			quda_inv_param.clover_cuda_prec = gpu_prec;
 			quda_inv_param.clover_cuda_prec_sloppy = gpu_half_prec;
 			quda_inv_param.clover_cuda_prec_precondition = gpu_half_prec;
+			quda_inv_param.cl_pad = 0;
 
 			// MG preconditioner precision
 			if( invParam.MULTIGRIDParamsP ) {
@@ -662,7 +655,7 @@ namespace Chroma
 				rel_resid = res.resid / sqrt(norm2(chi, A->subset()));
 
 				QDPIO::cout << solver_string
-				            << "QUDA  true residual = " << quda_inv_param.true_res
+				            << "QUDA  true residual = " << quda_inv_param.true_res[0]
 				            << std::endl;
 				QDPIO::cout << solver_string
 				            << "Chroma true residual = " << rel_resid

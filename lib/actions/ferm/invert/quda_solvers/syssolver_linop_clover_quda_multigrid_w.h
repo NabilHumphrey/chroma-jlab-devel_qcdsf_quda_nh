@@ -317,14 +317,6 @@ namespace Chroma
 			quda_inv_param.output_location = QUDA_CUDA_FIELD_LOCATION;
 #endif
 
-			// Autotuning
-			if( invParam.tuneDslashP ) {
-				quda_inv_param.tune = QUDA_TUNE_YES;
-			}
-			else {
-				quda_inv_param.tune = QUDA_TUNE_NO;
-			}
-
 			// Setup padding
 
 			multi1d<int> face_size(4);
@@ -347,6 +339,7 @@ namespace Chroma
 			quda_inv_param.clover_cuda_prec = gpu_prec;
 			quda_inv_param.clover_cuda_prec_sloppy = gpu_half_prec;
 		        quda_inv_param.clover_cuda_prec_precondition  = gpu_half_prec;
+			quda_inv_param.cl_pad = 0;
 			if( invParam.MULTIGRIDParamsP ) {
 				const MULTIGRIDSolverParams& ip = *(invParam.MULTIGRIDParams);
 

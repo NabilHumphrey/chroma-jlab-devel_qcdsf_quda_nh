@@ -325,6 +325,7 @@ public:
 		mg_inv_param.clover_cuda_prec = gpu_prec;
 		mg_inv_param.clover_cuda_prec_sloppy = gpu_half_prec;
 		mg_inv_param.clover_cuda_prec_precondition = gpu_prec;
+		mg_inv_param.cl_pad = 0;
 		mg_inv_param.clover_order = QUDA_PACKED_CLOVER_ORDER;
 		//
 		//Done...
@@ -339,21 +340,6 @@ public:
 		quda_inv_param.input_location = QUDA_CUDA_FIELD_LOCATION;
 		quda_inv_param.output_location = QUDA_CUDA_FIELD_LOCATION;
 #endif
-
-		// Autotuning
-		if( invParam.tuneDslashP ) {
-			QDPIO::cout << "Enabling Dslash Autotuning" << std::endl;
-
-			quda_inv_param.tune = QUDA_TUNE_YES;
-			mg_inv_param.tune = QUDA_TUNE_YES;
-		}
-		else {
-			QDPIO::cout << "Disabling Dslash Autotuning" << std::endl;
-
-			quda_inv_param.tune = QUDA_TUNE_NO;
-			mg_inv_param.tune = QUDA_TUNE_NO;
-		}
-
 
 		// Setup padding
 		multi1d<int> face_size(4);

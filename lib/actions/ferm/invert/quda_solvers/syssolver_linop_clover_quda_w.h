@@ -354,6 +354,7 @@ public:
 
 		// Default. may be overrridden by inner params
 		quda_inv_param.clover_cuda_prec_precondition = gpu_half_prec;
+		quda_inv_param.cl_pad = 0;
 
 #ifndef BUILD_QUDA_DEVIFACE_CLOVER
 #warning "NOT USING QUDA DEVICE IFACE"
@@ -364,19 +365,6 @@ public:
 		quda_inv_param.clover_location = QUDA_CUDA_FIELD_LOCATION;
 		quda_inv_param.clover_order = QUDA_QDPJIT_CLOVER_ORDER;
 #endif   
-
-		// Autotuning
-		if( invParam.tuneDslashP ) {
-			QDPIO::cout << "Enabling Dslash Autotuning" << std::endl;
-
-			quda_inv_param.tune = QUDA_TUNE_YES;
-		}
-		else {
-			QDPIO::cout << "Disabling Dslash Autotuning" << std::endl;
-
-			quda_inv_param.tune = QUDA_TUNE_NO;
-		}
-
 
 		// Setup padding
 		multi1d<int> face_size(4);

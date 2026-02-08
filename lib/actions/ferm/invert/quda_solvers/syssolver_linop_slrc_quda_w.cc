@@ -88,12 +88,10 @@ namespace Chroma
     invertQuda(spinorOut, spinorIn, (QudaInvertParam*)&quda_inv_param);
     swatch1.stop();
 
-    QDPIO::cout << solver_string << "time=" << quda_inv_param.secs << " s" ;
-    QDPIO::cout << "\tPerformance=" << quda_inv_param.gflops/quda_inv_param.secs << " GFLOPS" ;
-    QDPIO::cout << "\tTotal Time (incl. load gauge)=" << swatch1.getTimeInSeconds() << " s" << std::endl;
+    QDPIO::cout << solver_string << "Total Time (incl. load gauge)=" << swatch1.getTimeInSeconds() << " s" << std::endl;
 
     ret.n_count = quda_inv_param.iter;
-    ret.resid = quda_inv_param.true_res;
+    ret.resid = quda_inv_param.true_res[0];
     return ret;
 
   }
