@@ -200,7 +200,10 @@ namespace Chroma
 	// Initialize stuff
 	InitMatrices();
 
-	
+	// Cross-solve Krylov recycling state
+	first_solve_ = true;
+	prev_dim_cycle_ = invParam_.NKrylov;
+
       }
 
 
@@ -283,6 +286,12 @@ namespace Chroma
     mutable multi2d<DComplex> Hk_QR_;
     mutable multi1d<DComplex> Hk_QR_taus_;
 
+    // Cross-solve Krylov recycling state (GCRO-DR)
+    // When NDefl > 0, the Krylov subspace from one solve is recycled
+    // to accelerate subsequent solves with the same operator but
+    // different RHS (e.g., across spin-color components).
+    mutable bool first_solve_;
+    mutable int prev_dim_cycle_;
 
   };
 

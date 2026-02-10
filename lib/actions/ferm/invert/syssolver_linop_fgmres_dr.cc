@@ -478,7 +478,8 @@ namespace Chroma
     // Initialize iterations
     int iters_total = 0;
     int n_cycles = 0;
-    int prev_dim = invParam_.NKrylov; // This is the default previous dimension
+    // For cross-solve recycling: use saved dim from previous solve if available
+    int prev_dim = first_solve_ ? invParam_.NKrylov : prev_dim_cycle_;
 
     // We are done if norm is sufficiently accurate, 
     bool finished = toBool( r_norm <= target ) ;
@@ -496,8 +497,8 @@ namespace Chroma
 
       // Set up the input g vector (c-H eta?)
       // 
-      if (n_cycles == 1 || n_deflate == 0 ) { 
-	// We are either first cycle, or
+      if ((n_cycles == 1 && first_solve_) || n_deflate == 0 ) {
+	// We are either the very first cycle of the first solve, or
 	// We have no deflation subspace ie we are regular FGMRES
 	// and we are just restarting
 	//
@@ -754,6 +755,12 @@ namespace Chroma
       prev_dim = dim;
 
     }
+
+    // Save state for cross-solve Krylov recycling (GCRO-DR)
+    // V_, Z_, H_, c_, eta_ persist as mutable members and will be
+    // used by GetEigenvectors on the next call to operator()
+    first_solve_ = false;
+    prev_dim_cycle_ = prev_dim;
 
     // Either we've exceeded max iters, or we have converged in either case set res:
     res.n_count = iters_total;
