@@ -481,7 +481,47 @@ namespace Chroma
     // For cross-solve recycling: use saved dim from previous solve if available
     int prev_dim = first_solve_ ? invParam_.NKrylov : prev_dim_cycle_;
 
-    // We are done if norm is sufficiently accurate, 
+    // Cross-solve Krylov recycling: use the previous solve's Krylov
+    // subspace to compute an initial correction for the new RHS.
+    // This projects r onto the old Krylov space and applies the optimal
+    // correction, deflating the hard eigenvalue components before FGMRES.
+    // We avoid the augmentation branch (which has Givens/QR inconsistency
+    // issues) and instead run fresh FGMRES after this initial projection.
+    if (!first_solve_ && invParam_.NDefl > 0) {
+      Double r_norm_before = r_norm;
+
+      // Project new residual onto previous solve's Krylov basis
+      multi1d<DComplex> c_proj(prev_dim + 1);
+      for (int i = 0; i <= prev_dim; ++i) {
+        c_proj[i] = innerProduct(V_[i], r, s);
+      }
+
+      // Apply stored Givens rotations: g_proj = Q^H * c_proj
+      for (int j = 0; j < prev_dim; ++j) {
+        (*givens_rots_[j])(c_proj[j], c_proj[j+1]);
+      }
+
+      // Solve R * eta = g_proj via backsubstitution
+      multi1d<DComplex> eta_proj(prev_dim);
+      LeastSquaresSolve(R_, c_proj, eta_proj, prev_dim);
+
+      // Apply correction: psi += sum_j eta_j * Z_j
+      for (int j = 0; j < prev_dim; ++j) {
+        psi[s] += eta_proj[j] * Z_[j];
+      }
+
+      // Recompute residual
+      r[s] = chi;
+      (*A_)(tmp, psi, PLUS);
+      r[s] -= tmp;
+      r_norm = sqrt(norm2(r, s));
+
+      QDPIO::cout << "CROSS-SOLVE PROJECTION: ||r||/||b|| "
+                  << r_norm_before / norm_rhs << " -> "
+                  << r_norm / norm_rhs << std::endl;
+    }
+
+    // We are done if norm is sufficiently accurate,
     bool finished = toBool( r_norm <= target ) ;
 
     // We keep executing cycles until we are finished
@@ -497,10 +537,10 @@ namespace Chroma
 
       // Set up the input g vector (c-H eta?)
       // 
-      if ((n_cycles == 1 && first_solve_) || n_deflate == 0 ) {
-	// We are either the very first cycle of the first solve, or
-	// We have no deflation subspace ie we are regular FGMRES
-	// and we are just restarting
+      if (n_cycles == 1 || n_deflate == 0 ) {
+	// First cycle always uses fresh start (cross-solve initial
+	// correction is applied above, before the while loop).
+	// Also handles NDefl=0 (regular FGMRES restarts).
 	//
 	// Set up initial vector c = [ beta, 0 ... 0 ]^T
 	// In this case beta should be the r_norm, ie || r || (=|| b || for the first cycle)
@@ -655,44 +695,6 @@ namespace Chroma
 
 	for(int cols=n_deflate+1; cols < total_dim+1; ++cols) {
 	  V_[cols][s] = zero;
-	}
-
-	// Cross-solve recycling (GCRO-DR): replace V_[n_deflate] with
-	// the new residual projected orthogonal to V_[0..n_deflate-1].
-	// The QR-rotated V_[n_deflate] points in the OLD solve's residual
-	// direction and is nearly orthogonal to the new r, causing c_[n_deflate]~0.
-	// For within-solve restarts (n_cycles>1), V_[n_deflate] already captures
-	// the current residual direction, so this fix only applies to cross-solve.
-	if (n_cycles == 1) {
-	  T V_old_ndefl;
-	  V_old_ndefl[s] = V_[n_deflate];
-
-	  // Project r orthogonal to the deflation basis V_[0..n_deflate-1]
-	  T r_proj;
-	  r_proj[s] = r;
-	  for (int i = 0; i < n_deflate; ++i) {
-	    DComplex proj_coeff = innerProduct(V_[i], r_proj, s);
-	    r_proj[s] -= proj_coeff * V_[i];
-	  }
-
-	  Double r_proj_norm = sqrt(norm2(r_proj, s));
-	  if (toBool(r_proj_norm > Double(1.0e-14))) {
-	    Double r_proj_inv = Double(1) / r_proj_norm;
-	    V_[n_deflate][s] = r_proj_inv * r_proj;
-
-	    // Scale H_copy entries to account for the basis change.
-	    // Since V_new[n_deflate] is orthogonal to V[0..n_deflate-1]:
-	    //   H_new(col, n_deflate) = H_old(col, n_deflate) * <V_new, V_old>
-	    DComplex overlap = innerProduct(V_[n_deflate], V_old_ndefl, s);
-	    QDPIO::cout << "CROSS-SOLVE: r_proj_norm=" << r_proj_norm
-	                << " overlap=" << overlap << std::endl;
-	    for (int col = 0; col < n_deflate; ++col) {
-	      H_copy(col, n_deflate) *= overlap;
-	    }
-	  }
-	  else {
-	    QDPIO::cout << "CROSS-SOLVE: r in deflation span" << std::endl;
-	  }
 	}
 
 	// c = [ V^H_{k+1} r ]
