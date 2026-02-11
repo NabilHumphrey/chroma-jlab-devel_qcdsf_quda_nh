@@ -657,7 +657,45 @@ namespace Chroma
 	  V_[cols][s] = zero;
 	}
 
-	// c = [ V^H_{k+1} r ] 
+	// Cross-solve recycling (GCRO-DR): replace V_[n_deflate] with
+	// the new residual projected orthogonal to V_[0..n_deflate-1].
+	// The QR-rotated V_[n_deflate] points in the OLD solve's residual
+	// direction and is nearly orthogonal to the new r, causing c_[n_deflate]~0.
+	// For within-solve restarts (n_cycles>1), V_[n_deflate] already captures
+	// the current residual direction, so this fix only applies to cross-solve.
+	if (n_cycles == 1) {
+	  T V_old_ndefl;
+	  V_old_ndefl[s] = V_[n_deflate];
+
+	  // Project r orthogonal to the deflation basis V_[0..n_deflate-1]
+	  T r_proj;
+	  r_proj[s] = r;
+	  for (int i = 0; i < n_deflate; ++i) {
+	    DComplex proj_coeff = innerProduct(V_[i], r_proj, s);
+	    r_proj[s] -= proj_coeff * V_[i];
+	  }
+
+	  Double r_proj_norm = sqrt(norm2(r_proj, s));
+	  if (toBool(r_proj_norm > Double(1.0e-14))) {
+	    Double r_proj_inv = Double(1) / r_proj_norm;
+	    V_[n_deflate][s] = r_proj_inv * r_proj;
+
+	    // Scale H_copy entries to account for the basis change.
+	    // Since V_new[n_deflate] is orthogonal to V[0..n_deflate-1]:
+	    //   H_new(col, n_deflate) = H_old(col, n_deflate) * <V_new, V_old>
+	    DComplex overlap = innerProduct(V_[n_deflate], V_old_ndefl, s);
+	    QDPIO::cout << "CROSS-SOLVE: r_proj_norm=" << r_proj_norm
+	                << " overlap=" << overlap << std::endl;
+	    for (int col = 0; col < n_deflate; ++col) {
+	      H_copy(col, n_deflate) *= overlap;
+	    }
+	  }
+	  else {
+	    QDPIO::cout << "CROSS-SOLVE: r in deflation span" << std::endl;
+	  }
+	}
+
+	// c = [ V^H_{k+1} r ]
 	//     [      0      ]
 	for(int row=0; row < n_deflate+1; ++row) { 
 	  c_[row] = innerProduct( V_[row],r,s );  
