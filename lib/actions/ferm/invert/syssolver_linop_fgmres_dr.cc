@@ -498,7 +498,7 @@ namespace Chroma
 
       // Apply stored Givens rotations: g_proj = Q^H * c_proj
       for (int j = 0; j < prev_dim; ++j) {
-        (*givens_rots_[j])(c_proj[j], c_proj[j+1]);
+        (*givens_rots_[j])(c_proj);
       }
 
       // Solve R * eta = g_proj via backsubstitution
