@@ -10,6 +10,9 @@
 #include "meas/inline/abs_inline_measurement_factory.h"
 #include "meas/inline/io/named_objmap.h"
 #include "meas/glue/mesplq.h"
+#include "meas/hadron/nucleon_block_w.h"
+#include "meas/hadron/dibaryon_contract_w.h"
+#include "meas/hadron/barspinmat_w.h"
 #include "util/ferm/transf.h"
 #include "util/ft/sftmom.h"
 
@@ -311,17 +314,17 @@ namespace Chroma
       corr_spin_up.resize(num_mom, Lt);
       corr_spin_down.resize(num_mom, Lt);
 
-      SpinMatrix g_one = 1.0;
-      SpinMatrix Cg5 = Gamma(10) * (Gamma(15) * g_one);
+      // Get nucleon block with correct contraction (both Wick terms,
+      // proper Cg5 on both sides of diquark). Returns LatticeSpinMatrix
+      // with sink/source spin indices open.
+      // Proton: epsilon_{abc} (u^a Cg5 d^b) u^c
+      SpinMatrix Cg5 = BaryonSpinMats::Cg5();
+      LatticeSpinMatrix block = NucleonBlocks::nucleonBlock(
+          up_prop, down_prop, up_prop, Cg5);
 
-      LatticePropagator diquark = quarkContract13(up_prop * Cg5,
-                                                   Gamma(15) * down_prop);
-
-      // Positive parity projection
-      SpinMatrix parity_proj = 0.5 * (g_one + Gamma(8) * g_one);
-
-      // Get the full spin matrix (color traced, with third quark contracted)
-      LatticeSpinMatrix spin_matrix = parity_proj * traceColor(diquark * up_prop);
+      // Apply positive parity projection
+      SpinMatrix parity_proj = BaryonSpinMats::Tunpol();
+      LatticeSpinMatrix spin_matrix = parity_proj * block;
 
       // Extract spin-up component: Dirac indices (0,0)
       LatticeComplex spin_up_field = peekSpin(spin_matrix, 0, 0);
@@ -897,6 +900,103 @@ namespace Chroma
 
 
     //------------------------------------------------------------------
+    // Full 6-quark dibaryon contraction (direct + exchange)
+    //------------------------------------------------------------------
+
+    //! Compute dibaryon correlators with full 6-quark contractions
+    /*!
+     * Computes ALL 17 Wick contraction topologies (1 direct + 16 exchange)
+     * and returns Cartesian polarization correlators.
+     *
+     * The result includes both the product-ansatz (direct) term and the
+     * exchange terms where quarks cross between proton and neutron.
+     *
+     * \param up_prop     Up quark propagator (Read)
+     * \param down_prop   Down quark propagator (Read)
+     * \param phases      Momentum phases for Fourier transform (Read)
+     * \param t0          Source timeslice (Read)
+     * \param corr_x      x-polarization correlator output [time]
+     * \param corr_y      y-polarization correlator output [time]
+     * \param corr_z      z-polarization correlator output [time]
+     */
+    void dibaryonCorrelatorFullContraction(
+      const LatticePropagator& up_prop,
+      const LatticePropagator& down_prop,
+      const SftMom& phases,
+      int t0,
+      multi1d<DComplex>& corr_x,
+      multi1d<DComplex>& corr_y,
+      multi1d<DComplex>& corr_z)
+    {
+      START_CODE();
+
+      int Lt = phases.numSubsets();
+      corr_x.resize(Lt);
+      corr_y.resize(Lt);
+      corr_z.resize(Lt);
+      corr_x = zero;
+      corr_y = zero;
+      corr_z = zero;
+
+      QDPIO::cout << "Computing full 6-quark dibaryon contraction (17 topologies)..." << std::endl;
+
+      SpinMatrix Cg5 = BaryonSpinMats::Cg5();
+      SpinMatrix T_unpol = BaryonSpinMats::Tunpol();
+
+      // Full 6-quark contraction: direct (coeff +2) + 16 exchange terms
+      // Returns LatticeSpinMatrix B(s2_snk, s5_snk) with all source spins contracted
+      LatticeSpinMatrix full_result =
+        DibaryonContractions::dibaryonFull(up_prop, down_prop, Cg5);
+
+      // Apply positive-parity projection to both spectator sink spins
+      // proj(s2, s5) = T_unpol(s2, s2') * B(s2', s5') * T_unpol(s5, s5')
+      LatticeSpinMatrix proj = T_unpol * full_result * transposeSpin(T_unpol);
+
+      // Extract spin components for Cartesian basis
+      LatticeComplex upup = peekSpin(proj, 0, 0);      // s2=up, s5=up
+      LatticeComplex downdown = peekSpin(proj, 1, 1);   // s2=down, s5=down
+      LatticeComplex updown = peekSpin(proj, 0, 1);     // s2=up, s5=down
+      LatticeComplex downup = peekSpin(proj, 1, 0);     // s2=down, s5=up
+
+      // Cartesian polarization decomposition
+      LatticeComplex field_x = 0.5 * (upup + downdown);
+      LatticeComplex field_y = field_x;  // Identical by symmetry
+      LatticeComplex field_z = 0.5 * (updown + downup);
+
+      // Momentum projection (P=0 only: take zero-momentum component)
+      multi2d<DComplex> hsum_x = phases.sft(field_x);
+      multi2d<DComplex> hsum_y = phases.sft(field_y);
+      multi2d<DComplex> hsum_z = phases.sft(field_z);
+
+      // Find the zero-momentum index
+      int p0_idx = -1;
+      for (int ip = 0; ip < phases.numMom(); ++ip)
+      {
+        multi1d<int> mom = phases.numToMom(ip);
+        if (mom[0] == 0 && mom[1] == 0 && mom[2] == 0) {
+          p0_idx = ip;
+          break;
+        }
+      }
+
+      if (p0_idx >= 0)
+      {
+        for (int t = 0; t < Lt; ++t)
+        {
+          int t_eff = (t - t0 + Lt) % Lt;
+          corr_x[t_eff] = hsum_x[p0_idx][t];
+          corr_y[t_eff] = hsum_y[p0_idx][t];
+          corr_z[t_eff] = hsum_z[p0_idx][t];
+        }
+      }
+
+      QDPIO::cout << "Full 6-quark dibaryon contraction complete." << std::endl;
+
+      END_CODE();
+    }
+
+
+    //------------------------------------------------------------------
     // Vector-vector (di-rho) dimeson correlators with spin projection
     //------------------------------------------------------------------
 
@@ -1148,6 +1248,11 @@ namespace Chroma
           multi1d<DComplex> corr_x, corr_y, corr_z;
           bool have_cartesian_states = false;
 
+          // Full 6-quark contraction correlators (direct + exchange)
+          multi1d<DComplex> full_corr_x, full_corr_y, full_corr_z;
+          multi1d<DComplex> full_corr_total;
+          bool have_full_contraction = false;
+
           // Irrep-projected correlators for boosted states
           multi1d<DComplex> corr_A1, corr_Ey, corr_Ez;
           bool have_boosted_irreps = false;
@@ -1207,13 +1312,28 @@ namespace Chroma
             }
             else
             {
-              // P=0 dibaryon: Cartesian polarization correlators
+              // P=0 dibaryon: Cartesian polarization correlators (product ansatz)
               dibaryonCorrelatorCartesian(h1_up, h1_down, h2_up, h2_down,
                                           phases, corr_x, corr_y, corr_z);
 
               // Total spin-1 correlator = sum of Cartesian components
               dibaryonCorrelatorSpin1(corr_x, corr_y, corr_z, multi_hadron_corr);
               have_cartesian_states = true;
+
+              // Full 6-quark contraction (direct + 16 exchange topologies)
+              // Only for proton-neutron at P=0
+              if (state.hadron1 == "PROTON" && state.hadron2 == "NEUTRON")
+              {
+                dibaryonCorrelatorFullContraction(up_prop, down_prop, phases,
+                                                  params.param.t0,
+                                                  full_corr_x, full_corr_y, full_corr_z);
+
+                full_corr_total.resize(Lt);
+                for (int t = 0; t < Lt; ++t)
+                  full_corr_total[t] = full_corr_x[t] + full_corr_y[t] + full_corr_z[t];
+
+                have_full_contraction = true;
+              }
             }
 
             // Compute spin-traced single-hadron correlators for reference output
@@ -1420,6 +1540,59 @@ namespace Chroma
             pop(xml_out);
           }
 
+          // Full 6-quark contraction output (XML)
+          if (have_full_contraction)
+          {
+            push(xml_out, "full_contraction");
+            write(xml_out, "description", std::string("Full 6-quark contraction: direct (coeff +2) + 16 exchange topologies"));
+
+            push(xml_out, "total");
+            for (int t = 0; t < Lt; ++t)
+            {
+              push(xml_out, "elem");
+              write(xml_out, "t_eff", t);
+              write(xml_out, "re", Real(real(full_corr_total[t])));
+              write(xml_out, "im", Real(imag(full_corr_total[t])));
+              pop(xml_out);
+            }
+            pop(xml_out);
+
+            push(xml_out, "pol_x");
+            for (int t = 0; t < Lt; ++t)
+            {
+              push(xml_out, "elem");
+              write(xml_out, "t_eff", t);
+              write(xml_out, "re", Real(real(full_corr_x[t])));
+              write(xml_out, "im", Real(imag(full_corr_x[t])));
+              pop(xml_out);
+            }
+            pop(xml_out);
+
+            push(xml_out, "pol_y");
+            for (int t = 0; t < Lt; ++t)
+            {
+              push(xml_out, "elem");
+              write(xml_out, "t_eff", t);
+              write(xml_out, "re", Real(real(full_corr_y[t])));
+              write(xml_out, "im", Real(imag(full_corr_y[t])));
+              pop(xml_out);
+            }
+            pop(xml_out);
+
+            push(xml_out, "pol_z");
+            for (int t = 0; t < Lt; ++t)
+            {
+              push(xml_out, "elem");
+              write(xml_out, "t_eff", t);
+              write(xml_out, "re", Real(real(full_corr_z[t])));
+              write(xml_out, "im", Real(imag(full_corr_z[t])));
+              pop(xml_out);
+            }
+            pop(xml_out);
+
+            pop(xml_out);  // full_contraction
+          }
+
           pop(xml_out);  // state
 
           // Write plain text output
@@ -1475,6 +1648,35 @@ namespace Chroma
               {
                 ofs << state.name << "_z " << combo.label << " " << t
                     << " " << real(corr_z[t]) << " " << imag(corr_z[t])
+                    << "\n";
+              }
+            }
+
+            // Full 6-quark contraction (plain text)
+            if (have_full_contraction)
+            {
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_full " << combo.label << " " << t
+                    << " " << real(full_corr_total[t]) << " " << imag(full_corr_total[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_full_x " << combo.label << " " << t
+                    << " " << real(full_corr_x[t]) << " " << imag(full_corr_x[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_full_y " << combo.label << " " << t
+                    << " " << real(full_corr_y[t]) << " " << imag(full_corr_y[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_full_z " << combo.label << " " << t
+                    << " " << real(full_corr_z[t]) << " " << imag(full_corr_z[t])
                     << "\n";
               }
             }

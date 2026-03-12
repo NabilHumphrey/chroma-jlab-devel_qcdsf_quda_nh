@@ -10,6 +10,8 @@
 #include "meas/inline/abs_inline_measurement_factory.h"
 #include "meas/inline/io/named_objmap.h"
 #include "meas/glue/mesplq.h"
+#include "meas/hadron/nucleon_block_w.h"
+#include "meas/hadron/barspinmat_w.h"
 #include "util/ferm/transf.h"
 #include "util/ft/sftmom.h"
 
@@ -184,6 +186,9 @@ namespace Chroma
     /*!
      * Proton interpolator: epsilon_abc (u^a C gamma_5 d^b) u^c
      *
+     * Uses NucleonBlocks::nucl2pt for correct contraction with both Wick
+     * terms and proper Cg5 on both sides of the diquark.
+     *
      * \param up_prop    Propagator for up quarks (Read)
      * \param down_prop  Propagator for down quarks (Read)
      * \param phases     Momentum phases (Read)
@@ -204,21 +209,11 @@ namespace Chroma
 
       corr.resize(num_mom, Lt);
 
-      // C gamma_5 matrix for diquark
-      SpinMatrix g_one = 1.0;
-      SpinMatrix Cg5 = Gamma(10) * (Gamma(15) * g_one);  // C = gamma_4 * gamma_2
-
-      // Proton = epsilon_abc (u^a C gamma_5 d^b) u^c
-      // Diquark: (u C gamma_5 d) - contracts color indices a,b
-      // Third quark: u^c
-      LatticePropagator diquark = quarkContract13(up_prop * Cg5,
-                                                   Gamma(15) * down_prop);
-
-      // Positive parity projection
-      SpinMatrix parity_proj = 0.5 * (g_one + Gamma(8) * g_one);
-
-      // Contract diquark with third up quark and trace
-      LatticeComplex proton_field = trace(parity_proj * traceColor(diquark * up_prop));
+      // Proton = epsilon_{abc} (u^a Cg5 d^b) u^c with positive parity projection
+      SpinMatrix Cg5 = BaryonSpinMats::Cg5();
+      SpinMatrix T = BaryonSpinMats::Tunpol();
+      LatticeComplex proton_field = NucleonBlocks::nucl2pt(
+          up_prop, down_prop, up_prop, T, Cg5);
 
       // Momentum projection
       multi2d<DComplex> hsum = phases.sft(proton_field);

@@ -749,6 +749,8 @@ list(APPEND ChromaLIB_HEADERS
 	meas/hadron/group_baryon_operator_w.h
 	meas/hadron/barhqlq_w.h
 	meas/hadron/baryon_w.h
+	meas/hadron/nucleon_block_w.h
+	meas/hadron/dibaryon_contract_w.h
 	meas/hadron/BuildingBlocks_w.h
 	meas/hadron/rms_w.h
 	meas/hadron/barhqlq_qcdsf_w.h
@@ -1648,7 +1650,7 @@ target_sources(chromalib PRIVATE
     meas/hadron/simple_baryon_operator_w.cc 
     meas/hadron/simple_hadron_operator_w.cc 
     meas/hadron/group_baryon_operator_w.cc 
-	meas/hadron/baryon_w.cc meas/hadron/BuildingBlocks_w.cc 
+	meas/hadron/baryon_w.cc meas/hadron/nucleon_block_w.cc meas/hadron/dibaryon_contract_w.cc meas/hadron/BuildingBlocks_w.cc
 	meas/hadron/rms_w.cc
 	meas/hadron/barhqlq_qcdsf_w.cc
 	meas/hadron/mesons2_qcdsf_w.cc
