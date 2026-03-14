@@ -919,6 +919,57 @@ namespace Chroma
      * \param corr_y      y-polarization correlator output [time]
      * \param corr_z      z-polarization correlator output [time]
      */
+    //! Helper: project LatticeSpinMatrix(s2,s5) to total spin-1 correlator
+    /*!
+     * Applies T_unpol to both spectator spins and sums Cartesian polarizations:
+     *   total = C_x + C_y + C_z = 2*C_x + C_z
+     *   C_x = 0.5*(uu + dd), C_z = 0.5*(ud + du)
+     *
+     * Returns momentum-projected, time-shifted correlator array.
+     */
+    static void projectSpin1Total(
+      const LatticeSpinMatrix& B,
+      const SpinMatrix& T_unpol,
+      const SftMom& phases,
+      int t0,
+      multi1d<DComplex>& corr)
+    {
+      int Lt = phases.numSubsets();
+      corr.resize(Lt);
+      corr = zero;
+
+      LatticeSpinMatrix proj = T_unpol * B * transposeSpin(T_unpol);
+      LatticeComplex upup = peekSpin(proj, 0, 0);
+      LatticeComplex downdown = peekSpin(proj, 1, 1);
+      LatticeComplex updown = peekSpin(proj, 0, 1);
+      LatticeComplex downup = peekSpin(proj, 1, 0);
+
+      // Total = C_x + C_y + C_z = 2*0.5*(uu+dd) + 0.5*(ud+du)
+      LatticeComplex field = upup + downdown + 0.5 * (updown + downup);
+
+      multi2d<DComplex> hsum = phases.sft(field);
+
+      int p0_idx = -1;
+      for (int ip = 0; ip < phases.numMom(); ++ip)
+      {
+        multi1d<int> mom = phases.numToMom(ip);
+        if (mom[0] == 0 && mom[1] == 0 && mom[2] == 0) {
+          p0_idx = ip;
+          break;
+        }
+      }
+
+      if (p0_idx >= 0)
+      {
+        for (int t = 0; t < Lt; ++t)
+        {
+          int t_eff = (t - t0 + Lt) % Lt;
+          corr[t_eff] = hsum[p0_idx][t];
+        }
+      }
+    }
+
+
     void dibaryonCorrelatorFullContraction(
       const LatticePropagator& up_prop,
       const LatticePropagator& down_prop,
@@ -926,7 +977,11 @@ namespace Chroma
       int t0,
       multi1d<DComplex>& corr_x,
       multi1d<DComplex>& corr_y,
-      multi1d<DComplex>& corr_z)
+      multi1d<DComplex>& corr_z,
+      multi1d<DComplex>& corr_direct,
+      multi1d<DComplex>& corr_exchange,
+      multi1d<DComplex>& proton_block_check,
+      multi1d<DComplex>& neutron_block_check)
     {
       START_CODE();
 
@@ -943,32 +998,37 @@ namespace Chroma
       SpinMatrix Cg5 = BaryonSpinMats::Cg5();
       SpinMatrix T_unpol = BaryonSpinMats::Tunpol();
 
-      // Full 6-quark contraction: direct (coeff +2) + 16 exchange terms
-      // Returns LatticeSpinMatrix B(s2_snk, s5_snk) with all source spins contracted
-      LatticeSpinMatrix full_result =
-        DibaryonContractions::dibaryonFull(up_prop, down_prop, Cg5);
+      // Compute nucleon blocks separately
+      LatticeSpinMatrix B_P = NucleonBlocks::nucleonBlock(up_prop, down_prop, up_prop, Cg5);
+      LatticeSpinMatrix B_N = NucleonBlocks::nucleonBlock(down_prop, up_prop, down_prop, Cg5);
 
-      // Apply positive-parity projection to both spectator sink spins
-      // proj(s2, s5) = T_unpol(s2, s2') * B(s2', s5') * T_unpol(s5, s5')
+      // Direct term (topology 0, coeff +2): B_P * Cg5_inter * B_N^T
+      LatticeSpinMatrix direct = 2 * B_P * Cg5 * transposeSpin(B_N);
+
+      // Exchange terms (16 topologies)
+      LatticeSpinMatrix exchange =
+        DibaryonContractions::dibaryonExchange(up_prop, down_prop, Cg5);
+
+      // Full = direct + exchange
+      LatticeSpinMatrix full_result = direct + exchange;
+
+      // Project full result for Cartesian decomposition (as before)
       LatticeSpinMatrix proj = T_unpol * full_result * transposeSpin(T_unpol);
 
-      // Extract spin components for Cartesian basis
-      LatticeComplex upup = peekSpin(proj, 0, 0);      // s2=up, s5=up
-      LatticeComplex downdown = peekSpin(proj, 1, 1);   // s2=down, s5=down
-      LatticeComplex updown = peekSpin(proj, 0, 1);     // s2=up, s5=down
-      LatticeComplex downup = peekSpin(proj, 1, 0);     // s2=down, s5=up
+      LatticeComplex upup = peekSpin(proj, 0, 0);
+      LatticeComplex downdown = peekSpin(proj, 1, 1);
+      LatticeComplex updown = peekSpin(proj, 0, 1);
+      LatticeComplex downup = peekSpin(proj, 1, 0);
 
-      // Cartesian polarization decomposition
       LatticeComplex field_x = 0.5 * (upup + downdown);
-      LatticeComplex field_y = field_x;  // Identical by symmetry
+      LatticeComplex field_y = field_x;
       LatticeComplex field_z = 0.5 * (updown + downup);
 
-      // Momentum projection (P=0 only: take zero-momentum component)
+      // Momentum projection
       multi2d<DComplex> hsum_x = phases.sft(field_x);
       multi2d<DComplex> hsum_y = phases.sft(field_y);
       multi2d<DComplex> hsum_z = phases.sft(field_z);
 
-      // Find the zero-momentum index
       int p0_idx = -1;
       for (int ip = 0; ip < phases.numMom(); ++ip)
       {
@@ -988,6 +1048,49 @@ namespace Chroma
           corr_y[t_eff] = hsum_y[p0_idx][t];
           corr_z[t_eff] = hsum_z[p0_idx][t];
         }
+      }
+
+      // --- Diagnostic outputs ---
+
+      // Direct-only and exchange-only total spin-1 correlators
+      projectSpin1Total(direct, T_unpol, phases, t0, corr_direct);
+      projectSpin1Total(exchange, T_unpol, phases, t0, corr_exchange);
+
+      // Nucleon block check: trace(T_unpol * B_P/N) should match proton/neutron
+      {
+        LatticeComplex pfield = traceSpin(T_unpol * B_P);
+        LatticeComplex nfield = traceSpin(T_unpol * B_N);
+        multi2d<DComplex> phsum = phases.sft(pfield);
+        multi2d<DComplex> nhsum = phases.sft(nfield);
+
+        proton_block_check.resize(Lt);
+        neutron_block_check.resize(Lt);
+        proton_block_check = zero;
+        neutron_block_check = zero;
+
+        if (p0_idx >= 0)
+        {
+          for (int t = 0; t < Lt; ++t)
+          {
+            int t_eff = (t - t0 + Lt) % Lt;
+            proton_block_check[t_eff] = phsum[p0_idx][t];
+            neutron_block_check[t_eff] = nhsum[p0_idx][t];
+          }
+        }
+      }
+
+      // Print diagnostic info for first few timeslices
+      QDPIO::cout << "=== Dibaryon diagnostic (t=0..3) ===" << std::endl;
+      for (int t = 0; t < 4 && t < Lt; ++t)
+      {
+        QDPIO::cout << "t=" << t
+          << "  direct=(" << real(corr_direct[t]) << "," << imag(corr_direct[t]) << ")"
+          << "  exchange=(" << real(corr_exchange[t]) << "," << imag(corr_exchange[t]) << ")"
+          << "  full=(" << real(corr_direct[t]+corr_exchange[t]) << "," << imag(corr_direct[t]+corr_exchange[t]) << ")"
+          << std::endl;
+        QDPIO::cout << "  proton_block=(" << real(proton_block_check[t]) << "," << imag(proton_block_check[t]) << ")"
+          << "  neutron_block=(" << real(neutron_block_check[t]) << "," << imag(neutron_block_check[t]) << ")"
+          << std::endl;
       }
 
       QDPIO::cout << "Full 6-quark dibaryon contraction complete." << std::endl;
@@ -1251,6 +1354,8 @@ namespace Chroma
           // Full 6-quark contraction correlators (direct + exchange)
           multi1d<DComplex> full_corr_x, full_corr_y, full_corr_z;
           multi1d<DComplex> full_corr_total;
+          multi1d<DComplex> full_corr_direct, full_corr_exchange;
+          multi1d<DComplex> proton_block_check, neutron_block_check;
           bool have_full_contraction = false;
 
           // Irrep-projected correlators for boosted states
@@ -1326,7 +1431,9 @@ namespace Chroma
               {
                 dibaryonCorrelatorFullContraction(up_prop, down_prop, phases,
                                                   params.param.t0,
-                                                  full_corr_x, full_corr_y, full_corr_z);
+                                                  full_corr_x, full_corr_y, full_corr_z,
+                                                  full_corr_direct, full_corr_exchange,
+                                                  proton_block_check, neutron_block_check);
 
                 full_corr_total.resize(Lt);
                 for (int t = 0; t < Lt; ++t)
@@ -1677,6 +1784,31 @@ namespace Chroma
               {
                 ofs << state.name << "_full_z " << combo.label << " " << t
                     << " " << real(full_corr_z[t]) << " " << imag(full_corr_z[t])
+                    << "\n";
+              }
+              // Diagnostic: direct-only, exchange-only, nucleon block checks
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_direct " << combo.label << " " << t
+                    << " " << real(full_corr_direct[t]) << " " << imag(full_corr_direct[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_exchange " << combo.label << " " << t
+                    << " " << real(full_corr_exchange[t]) << " " << imag(full_corr_exchange[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_block_P " << combo.label << " " << t
+                    << " " << real(proton_block_check[t]) << " " << imag(proton_block_check[t])
+                    << "\n";
+              }
+              for (int t = 0; t < Lt; ++t)
+              {
+                ofs << state.name << "_block_N " << combo.label << " " << t
+                    << " " << real(neutron_block_check[t]) << " " << imag(neutron_block_check[t])
                     << "\n";
               }
             }
