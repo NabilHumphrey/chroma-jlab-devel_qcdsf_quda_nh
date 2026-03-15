@@ -998,19 +998,23 @@ namespace Chroma
       SpinMatrix Cg5 = BaryonSpinMats::Cg5();
       SpinMatrix T_unpol = BaryonSpinMats::Tunpol();
 
-      // Compute nucleon blocks separately
+      // Compute nucleon blocks for diagnostic output
       LatticeSpinMatrix B_P = NucleonBlocks::nucleonBlock(up_prop, down_prop, up_prop, Cg5);
       LatticeSpinMatrix B_N = NucleonBlocks::nucleonBlock(down_prop, up_prop, down_prop, Cg5);
 
-      // Direct term (topology 0, coeff +2): B_P * Cg5_inter * B_N^T
-      LatticeSpinMatrix direct = 2 * B_P * Cg5 * transposeSpin(B_N);
+      // Direct term has net coefficient 0 in I=0 channel with product source.
+      // The pn and np direct terms cancel because the symmetric T_unpol
+      // coupling cannot distinguish the two orderings.
+      // Keep a zero direct term for diagnostic output consistency.
+      LatticeSpinMatrix direct;
+      direct = zero;
 
-      // Exchange terms (16 topologies)
+      // Exchange terms (16 topologies) — these carry the full I=0 signal
       LatticeSpinMatrix exchange =
-        DibaryonContractions::dibaryonExchange(up_prop, down_prop, Cg5);
+        DibaryonContractions::dibaryonExchange(up_prop, down_prop, Cg5, T_unpol);
 
-      // Full = direct + exchange
-      LatticeSpinMatrix full_result = direct + exchange;
+      // Full = exchange only (direct is zero for I=0)
+      LatticeSpinMatrix full_result = exchange;
 
       // Project full result for Cartesian decomposition (as before)
       LatticeSpinMatrix proj = T_unpol * full_result * transposeSpin(T_unpol);

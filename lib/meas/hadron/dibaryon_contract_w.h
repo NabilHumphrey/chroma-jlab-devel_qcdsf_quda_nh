@@ -3,12 +3,16 @@
  * @file dibaryon_contract_w.h
  * @brief Full 6-quark dibaryon contraction with exchange diagrams
  *
- * Implements all 17 Wick contraction topologies for the deuteron
- * (proton-neutron) system. The direct term (topology 0, coeff +2)
- * factorizes into nucleon blocks. The 16 exchange terms require
- * per-site explicit color/spin loop contractions because quarkContract13
- * cannot decouple source and sink epsilon contractions when source
- * epsilon groupings cross sink baryon blocks.
+ * Implements the 16 exchange Wick contraction topologies for the I=0
+ * deuteron (proton-neutron) system with product source (independent
+ * T_unpol-projected baryons). The direct term (topology 0) has net
+ * coefficient 0 in the I=0 channel — the pn and np contributions
+ * cancel with symmetric inter-baryon coupling. All I=0 signal comes
+ * from quark-exchange topologies.
+ *
+ * Each exchange topology has 3 source quark pairings: 2 are Cg5
+ * diquark contractions, 1 is the "open" (inter-baryon) pair where
+ * each propagator is independently projected through T_unpol.
  *
  * Slot definitions (sink side, fixed for all topologies):
  *   slot 0: P.dq1 -> S_u   (proton diquark 1)
@@ -46,6 +50,7 @@ namespace Chroma
       int eps_A[3];    //! Source epsilon group A (slot indices)
       int eps_B[3];    //! Source epsilon group B (slot indices)
       int cg5[3][2];   //! Source Cg5 pairings: 3 pairs of (slot_p, slot_q)
+      int open_pair;   //! Which of the 3 pairs is inter-baryon (0,1,2)
     };
 
     //! Table of 16 exchange topologies
@@ -70,32 +75,36 @@ namespace Chroma
      * color and spin loops. The computation is embarrassingly parallel
      * across lattice sites (QDP++ handles the parallelism).
      *
-     * \param S_u  Up quark propagator (Read)
-     * \param S_d  Down quark propagator (Read)
-     * \param Cg5  Diquark spin matrix C*gamma_5 (Read)
+     * \param S_u     Up quark propagator (Read)
+     * \param S_d     Down quark propagator (Read)
+     * \param Cg5     Diquark spin matrix C*gamma_5 (Read)
+     * \param T_unpol Unpolarized projection (1+gamma_4)/2 (Read)
      *
      * \return LatticeSpinMatrix B_{s2,s5}(x) exchange contribution
      */
     LatticeSpinMatrix dibaryonExchange(
         const LatticePropagator& S_u,
         const LatticePropagator& S_d,
-        const SpinMatrix& Cg5);
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol);
 
-    //! Compute FULL dibaryon correlator: direct + exchange (spin-resolved)
+    //! Compute FULL dibaryon correlator (spin-resolved)
     /*!
-     * Returns a LatticeSpinMatrix combining the direct term (coeff +2,
-     * factorized via nucleon blocks) and all 16 exchange terms.
+     * Returns a LatticeSpinMatrix from all 16 exchange topologies.
+     * (Direct term has net coeff 0 in I=0 and is not included.)
      *
-     * \param S_u  Up quark propagator (Read)
-     * \param S_d  Down quark propagator (Read)
-     * \param Cg5  Diquark spin matrix C*gamma_5 (Read)
+     * \param S_u     Up quark propagator (Read)
+     * \param S_d     Down quark propagator (Read)
+     * \param Cg5     Diquark spin matrix C*gamma_5 (Read)
+     * \param T_unpol Unpolarized projection (1+gamma_4)/2 (Read)
      *
      * \return LatticeSpinMatrix B_{s2,s5}(x) full dibaryon contraction
      */
     LatticeSpinMatrix dibaryonFull(
         const LatticePropagator& S_u,
         const LatticePropagator& S_d,
-        const SpinMatrix& Cg5);
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol);
 
   } // namespace DibaryonContractions
 

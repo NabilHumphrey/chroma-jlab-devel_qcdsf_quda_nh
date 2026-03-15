@@ -2,17 +2,17 @@
  * @file dibaryon_contract_w.cc
  * @brief Full 6-quark dibaryon contraction with exchange diagrams
  *
- * Optimized contraction using source-Cg5 diquark factorization:
- *   D_{p,q}(sp,sq) = sum_{bp,bq} Cg5(bp,bq) * S[p](sp,bp) * S[q](sq,bq)
- *                  = (S[p] * Cg5 * S[q]^T)(sp,sq)
+ * Optimized contraction using source diquark factorization:
+ *   Diquark pairs: D(sp,sq) = (S[p] * Cg5 * S[q]^T)(sp,sq)
+ *   Open (inter-baryon) pair: product of T_unpol-projected propagators
  *
- * This reduces the 6 source spin loops to 3 spin matrix multiplies.
+ * The I=0 direct term has net coefficient 0 with the product source
+ * (symmetric T_unpol coupling). All signal comes from exchange terms.
  *
  * See dibaryon_contract_w.h for full documentation.
  */
 
 #include "meas/hadron/dibaryon_contract_w.h"
-#include "meas/hadron/nucleon_block_w.h"
 
 namespace Chroma
 {
@@ -33,23 +33,26 @@ namespace Chroma
     // =================================================================
     // 16 exchange topologies (from deuteron_wick_enum.py)
     // =================================================================
+    // Coefficients recomputed for product source (T_unpol inter-baryon,
+    // no Cg5 antisymmetry sign for the open pair).
     const ExchangeTopology exchange_topos[NUM_EXCHANGE_TOPOS] = {
-      { -1, {0,1,3}, {2,4,5}, {{0,1}, {2,3}, {4,5}} },  // #1
-      { +1, {0,1,3}, {2,4,5}, {{0,1}, {2,5}, {3,4}} },  // #2
-      { +1, {0,1,3}, {2,4,5}, {{0,3}, {1,2}, {4,5}} },  // #3
-      { +1, {0,1,3}, {2,4,5}, {{0,3}, {1,4}, {2,5}} },  // #4
-      { -1, {0,1,4}, {2,3,5}, {{0,1}, {2,3}, {4,5}} },  // #5
-      { +1, {0,1,4}, {2,3,5}, {{0,5}, {1,4}, {2,3}} },  // #6
-      { +1, {0,2,3}, {1,4,5}, {{0,3}, {1,2}, {4,5}} },  // #7
-      { +1, {0,2,3}, {1,4,5}, {{0,3}, {1,4}, {2,5}} },  // #8
-      { -1, {0,2,5}, {1,3,4}, {{0,5}, {1,2}, {3,4}} },  // #9
-      { +1, {0,2,5}, {1,3,4}, {{0,5}, {1,4}, {2,3}} },  // #10
-      { +1, {0,3,4}, {1,2,5}, {{0,1}, {2,5}, {3,4}} },  // #11
-      { +1, {0,3,4}, {1,2,5}, {{0,3}, {1,2}, {4,5}} },  // #12
-      { +1, {0,3,4}, {1,2,5}, {{0,3}, {1,4}, {2,5}} },  // #13
-      { -1, {0,3,4}, {1,2,5}, {{0,5}, {1,2}, {3,4}} },  // #14
-      { +1, {0,3,5}, {1,2,4}, {{0,3}, {1,2}, {4,5}} },  // #15
-      { +1, {0,3,5}, {1,2,4}, {{0,3}, {1,4}, {2,5}} },  // #16
+      //                                                          open_pair
+      { +1, {0,1,3}, {2,4,5}, {{0,1}, {2,3}, {4,5}}, 1 },  // #1
+      { +1, {0,1,3}, {2,4,5}, {{0,1}, {2,5}, {3,4}}, 2 },  // #2
+      { +1, {0,1,3}, {2,4,5}, {{0,3}, {1,2}, {4,5}}, 1 },  // #3
+      { +1, {0,1,3}, {2,4,5}, {{0,3}, {1,4}, {2,5}}, 1 },  // #4
+      { -1, {0,1,4}, {2,3,5}, {{0,1}, {2,3}, {4,5}}, 2 },  // #5
+      { +1, {0,1,4}, {2,3,5}, {{0,5}, {1,4}, {2,3}}, 0 },  // #6
+      { -1, {0,2,3}, {1,4,5}, {{0,3}, {1,2}, {4,5}}, 1 },  // #7
+      { +1, {0,2,3}, {1,4,5}, {{0,3}, {1,4}, {2,5}}, 2 },  // #8
+      { -1, {0,2,5}, {1,3,4}, {{0,5}, {1,2}, {3,4}}, 1 },  // #9
+      { -1, {0,2,5}, {1,3,4}, {{0,5}, {1,4}, {2,3}}, 2 },  // #10
+      { +1, {0,3,4}, {1,2,5}, {{0,1}, {2,5}, {3,4}}, 0 },  // #11
+      { +1, {0,3,4}, {1,2,5}, {{0,3}, {1,2}, {4,5}}, 2 },  // #12
+      { -1, {0,3,4}, {1,2,5}, {{0,3}, {1,4}, {2,5}}, 1 },  // #13
+      { -1, {0,3,4}, {1,2,5}, {{0,5}, {1,2}, {3,4}}, 0 },  // #14
+      { -1, {0,3,5}, {1,2,4}, {{0,3}, {1,2}, {4,5}}, 2 },  // #15
+      { -1, {0,3,5}, {1,2,4}, {{0,3}, {1,4}, {2,5}}, 2 },  // #16
     };
 
     // Slot -> flavor index: 0=up, 1=down
@@ -62,7 +65,8 @@ namespace Chroma
     LatticeSpinMatrix dibaryonExchange(
         const LatticePropagator& S_u,
         const LatticePropagator& S_d,
-        const SpinMatrix& Cg5)
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol)
     {
 #if QDP_NC == 3
       START_CODE();
@@ -80,20 +84,35 @@ namespace Chroma
         }
 
       // ---------------------------------------------------------
-      // Step 2: Precompute Cg5 * transpose(S) for all color blocks
-      //
-      // Diquark: D(sp,sq) = sum_{bp,bq} S[p](sp,bp) * Cg5(bp,bq) * S[q](sq,bq)
-      //        = sum_bp S[p](sp,bp) * (Cg5 * S[q]^T)(bp,sq)
-      //        = (S[p] * Cg5 * S[q]^T)(sp,sq)
-      //
+      // Step 2a: Precompute Cg5 * transpose(S) for diquark pairs
       // CgST[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b])
-      // Then: D = S_color[fp][ap][cp] * CgST[fq][aq][cq]
       // ---------------------------------------------------------
       LatticeSpinMatrix CgST[2][Nc][Nc];
       for (int f = 0; f < 2; f++)
         for (int a = 0; a < Nc; a++)
           for (int b = 0; b < Nc; b++)
             CgST[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b]);
+
+      // ---------------------------------------------------------
+      // Step 2b: Precompute T_unpol-projected propagator sums
+      // for the inter-baryon (open) pair.
+      //
+      // Tv[f][a][b][s] = sum_beta S_color[f][a][b](s, beta) * T_unpol(beta, beta)
+      //
+      // Since T_unpol = diag(1,1,0,0) in DeGrand-Rossi, this sums
+      // the first two source spin components for each sink spin.
+      // ---------------------------------------------------------
+      LatticeComplex Tv[2][Nc][Nc][Nd];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++) {
+            LatticeSpinMatrix ST = S_color[f][a][b] * T_unpol;
+            for (int s = 0; s < Nd; s++) {
+              Tv[f][a][b][s] = zero;
+              for (int beta = 0; beta < Nd; beta++)
+                Tv[f][a][b][s] += peekSpin(ST, s, beta);
+            }
+          }
 
       // ---------------------------------------------------------
       // Step 3: Precompute nonzero Cg5 entries for sink contraction
@@ -177,34 +196,36 @@ namespace Chroma
 
                 int color_sign = topo.coeff * signA * signB * signP * signN;
 
-                // Build 3 source-Cg5 diquark matrices
-                // D[k](s_pk, s_qk) = (S[pk] * CgST[qk])(s_pk, s_qk)
-                // = sum_{bp,bq} S[pk](s_pk,bp) * Cg5(bp,bq) * S[qk](s_qk,bq)
-                LatticeSpinMatrix D[3];
+                // Build source pair elements as LatticeComplex
+                // For diquark pairs: D(sp,sq) = (S[p] * Cg5 * S[q]^T)(sp,sq)
+                // For open pair: De[k][r][c] = Tv_p[r] * Tv_q[c]
+                //   (T_unpol projection on each propagator independently)
+                LatticeComplex De[3][Nd][Nd];
+
                 for (int k = 0; k < 3; k++) {
                   int pk = topo.cg5[k][0];
                   int qk = topo.cg5[k][1];
-                  D[k] = S_color[slot_flavor[pk]][a_snk[pk]][c_src[pk]]
-                       * CgST[slot_flavor[qk]][a_snk[qk]][c_src[qk]];
-                }
 
-                // Extract diquark elements as LatticeComplex
-                LatticeComplex De[3][Nd][Nd];
-                for (int k = 0; k < 3; k++)
-                  for (int r = 0; r < Nd; r++)
-                    for (int c = 0; c < Nd; c++)
-                      De[k][r][c] = peekSpin(D[k], r, c);
+                  if (k == topo.open_pair) {
+                    // Inter-baryon pair: T_unpol projection (no Cg5)
+                    for (int r = 0; r < Nd; r++)
+                      for (int c = 0; c < Nd; c++)
+                        De[k][r][c] =
+                          Tv[slot_flavor[pk]][a_snk[pk]][c_src[pk]][r] *
+                          Tv[slot_flavor[qk]][a_snk[qk]][c_src[qk]][c];
+                  } else {
+                    // Diquark pair: Cg5 contraction
+                    LatticeSpinMatrix D =
+                      S_color[slot_flavor[pk]][a_snk[pk]][c_src[pk]]
+                      * CgST[slot_flavor[qk]][a_snk[qk]][c_src[qk]];
+                    for (int r = 0; r < Nd; r++)
+                      for (int c = 0; c < Nd; c++)
+                        De[k][r][c] = peekSpin(D, r, c);
+                  }
+                }
 
                 // Contract sink Cg5 (proton diquark s0,s1; neutron diquark s3,s4)
                 // and accumulate into result_elem[s2][s5]
-                //
-                // result(s2,s5) += color_sign
-                //   * sum_{s0,s1} Cg5(s0,s1) * sum_{s3,s4} Cg5(s3,s4)
-                //   * D0(s_{p0},s_{q0}) * D1(s_{p1},s_{q1}) * D2(s_{p2},s_{q2})
-                //
-                // where D[k] row = s_{cg5[k][0]}, col = s_{cg5[k][1]}
-                // and s0..s5 are the sink spins for slots 0..5
-
                 for (int s2 = 0; s2 < Nd; s2++) {
                   for (int s5 = 0; s5 < Nd; s5++) {
 
@@ -223,8 +244,7 @@ namespace Chroma
                         // All 6 sink spins determined
                         int s[NUM_SLOTS] = {s0, s1, s2, s3, s4, s5};
 
-                        // Product of 3 diquark elements
-                        // D[k] indexed by (s[cg5[k][0]], s[cg5[k][1]])
+                        // Product of 3 pair elements
                         acc += cg5_nz[iP].val * cg5_nz[iN].val *
                           De[0][s[topo.cg5[0][0]]][s[topo.cg5[0][1]]] *
                           De[1][s[topo.cg5[1][0]]][s[topo.cg5[1][1]]] *
@@ -270,24 +290,23 @@ namespace Chroma
     LatticeSpinMatrix dibaryonFull(
         const LatticePropagator& S_u,
         const LatticePropagator& S_d,
-        const SpinMatrix& Cg5)
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol)
     {
 #if QDP_NC == 3
       START_CODE();
 
-      // Direct term (topology 0, coeff +2):
-      //   B_P(s2,beta2) * Cg5(beta2,beta5) * B_N(s5,beta5)
-      //   = (B_P * Cg5 * B_N^T)_{s2,s5}
-      LatticeSpinMatrix B_P = NucleonBlocks::nucleonBlock(S_u, S_d, S_u, Cg5);
-      LatticeSpinMatrix B_N = NucleonBlocks::nucleonBlock(S_d, S_u, S_d, Cg5);
+      // Direct term (topology 0) has net coefficient 0 in I=0 channel
+      // with product source (T_unpol projection). The pn and np direct
+      // terms cancel because the symmetric T_unpol coupling cannot
+      // distinguish the two orderings. The I=0 signal comes entirely
+      // from quark-exchange topologies.
 
-      LatticeSpinMatrix direct = 2 * B_P * Cg5 * transposeSpin(B_N);
-
-      // Exchange terms
-      LatticeSpinMatrix exchange = dibaryonExchange(S_u, S_d, Cg5);
+      // All 16 exchange topologies
+      LatticeSpinMatrix exchange = dibaryonExchange(S_u, S_d, Cg5, T_unpol);
 
       END_CODE();
-      return direct + exchange;
+      return exchange;
 
 #else
       LatticeSpinMatrix a;
