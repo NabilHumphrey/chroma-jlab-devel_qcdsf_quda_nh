@@ -1010,8 +1010,48 @@ namespace Chroma
       direct = zero;
 
       // Exchange terms (16 topologies) — these carry the full I=0 signal
+      QDPIO::cout << "  Running per-site exchange contraction..." << std::endl;
+      StopWatch swatch_fast;
+      swatch_fast.reset();
+      swatch_fast.start();
       LatticeSpinMatrix exchange =
         DibaryonContractions::dibaryonExchange(up_prop, down_prop, Cg5, T_unpol);
+      swatch_fast.stop();
+      QDPIO::cout << "  Per-site exchange contraction: " << swatch_fast.getTimeInSeconds() << " sec" << std::endl;
+
+      // --- Verification: compare against reference (lattice-wide) implementation ---
+      // Enable with environment variable DIBARYON_VERIFY=1
+      {
+        char* verify_env = getenv("DIBARYON_VERIFY");
+        if (verify_env != NULL && std::string(verify_env) == "1")
+        {
+          QDPIO::cout << "  DIBARYON_VERIFY: Running reference (slow) implementation for comparison..." << std::endl;
+          StopWatch swatch_ref;
+          swatch_ref.reset();
+          swatch_ref.start();
+          LatticeSpinMatrix exchange_ref =
+            DibaryonContractions::dibaryonExchangeReference(up_prop, down_prop, Cg5, T_unpol);
+          swatch_ref.stop();
+          QDPIO::cout << "  Reference exchange contraction: " << swatch_ref.getTimeInSeconds() << " sec" << std::endl;
+
+          // Compare using global norm: ||fast - ref||^2 / ||ref||^2
+          LatticeSpinMatrix diff = exchange - exchange_ref;
+          Double norm_diff = norm2(diff);    // sum over all sites of |diff|^2
+          Double norm_ref  = norm2(exchange_ref);
+
+          QDPIO::cout << "  DIBARYON_VERIFY: ||fast - ref||^2 = " << norm_diff << std::endl;
+          QDPIO::cout << "  DIBARYON_VERIFY: ||ref||^2        = " << norm_ref << std::endl;
+          if (toBool(norm_ref > 0.0))
+            QDPIO::cout << "  DIBARYON_VERIFY: relative diff   = " << sqrt(norm_diff / norm_ref) << std::endl;
+
+          Double tol = Double(1.0e-10);
+          if (toBool(norm_ref > 0.0) && toBool(sqrt(norm_diff / norm_ref) > tol)) {
+            QDPIO::cerr << "  DIBARYON_VERIFY: FAILED -- relative difference exceeds " << tol << std::endl;
+            QDP_abort(1);
+          }
+          QDPIO::cout << "  DIBARYON_VERIFY: PASSED" << std::endl;
+        }
+      }
 
       // Full = exchange only (direct is zero for I=0)
       LatticeSpinMatrix full_result = exchange;

@@ -2,9 +2,10 @@
  * @file dibaryon_contract_w.cc
  * @brief Full 6-quark dibaryon contraction with exchange diagrams
  *
- * Optimized contraction using source diquark factorization:
- *   Diquark pairs: D(sp,sq) = (S[p] * Cg5 * S[q]^T)(sp,sq)
- *   Open (inter-baryon) pair: product of T_unpol-projected propagators
+ * Optimized contraction using per-site scalar arithmetic.
+ * All 16 exchange topology contractions are performed in a single
+ * sweep over the lattice, extracting propagator elements at each
+ * site and doing all color/spin index work with scalar Complex.
  *
  * The I=0 direct term has net coefficient 0 with the product source
  * (symmetric T_unpol coupling). All signal comes from exchange terms.
@@ -60,7 +61,7 @@ namespace Chroma
 
 
     // =================================================================
-    // Exchange contraction: optimized with diquark factorization
+    // Exchange contraction: per-site scalar implementation
     // =================================================================
     LatticeSpinMatrix dibaryonExchange(
         const LatticePropagator& S_u,
@@ -72,50 +73,7 @@ namespace Chroma
       START_CODE();
 
       // ---------------------------------------------------------
-      // Step 1: Extract all color blocks as LatticeSpinMatrix
-      // S_color[flavor][a_snk][a_src]
-      // flavor 0=up, 1=down; a,b = 0,1,2 (color indices)
-      // ---------------------------------------------------------
-      LatticeSpinMatrix S_color[2][Nc][Nc];
-      for (int a = 0; a < Nc; a++)
-        for (int b = 0; b < Nc; b++) {
-          S_color[0][a][b] = peekColor(S_u, a, b);
-          S_color[1][a][b] = peekColor(S_d, a, b);
-        }
-
-      // ---------------------------------------------------------
-      // Step 2a: Precompute Cg5 * transpose(S) for diquark pairs
-      // CgST[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b])
-      // ---------------------------------------------------------
-      LatticeSpinMatrix CgST[2][Nc][Nc];
-      for (int f = 0; f < 2; f++)
-        for (int a = 0; a < Nc; a++)
-          for (int b = 0; b < Nc; b++)
-            CgST[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b]);
-
-      // ---------------------------------------------------------
-      // Step 2b: Precompute T_unpol-projected propagator sums
-      // for the inter-baryon (open) pair.
-      //
-      // Tv[f][a][b][s] = sum_beta S_color[f][a][b](s, beta) * T_unpol(beta, beta)
-      //
-      // Since T_unpol = diag(1,1,0,0) in DeGrand-Rossi, this sums
-      // the first two source spin components for each sink spin.
-      // ---------------------------------------------------------
-      LatticeComplex Tv[2][Nc][Nc][Nd];
-      for (int f = 0; f < 2; f++)
-        for (int a = 0; a < Nc; a++)
-          for (int b = 0; b < Nc; b++) {
-            LatticeSpinMatrix ST = S_color[f][a][b] * T_unpol;
-            for (int s = 0; s < Nd; s++) {
-              Tv[f][a][b][s] = zero;
-              for (int beta = 0; beta < Nd; beta++)
-                Tv[f][a][b][s] += peekSpin(ST, s, beta);
-            }
-          }
-
-      // ---------------------------------------------------------
-      // Step 3: Precompute nonzero Cg5 entries for sink contraction
+      // Precompute nonzero Cg5 entries (scalar, tiny)
       // ---------------------------------------------------------
       struct Cg5Entry { int r, c; Complex val; };
       Cg5Entry cg5_nz[Nd*Nd];
@@ -132,8 +90,309 @@ namespace Chroma
         }
 
       // ---------------------------------------------------------
-      // Step 4: Accumulate results into LatticeComplex array
-      // result_elem[s2][s5] accumulates the exchange contribution
+      // Precompute nonzero T_unpol entries
+      // T_unpol = (1+gamma_4)/2: diagonal in DeGrand-Rossi basis
+      // ---------------------------------------------------------
+      struct TEntry { int idx; Real val; };
+      TEntry tunpol_nz[Nd];
+      int n_tunpol_nz = 0;
+      for (int b = 0; b < Nd; b++) {
+        Complex v = peekSpin(T_unpol, b, b);
+        if (toBool(real(v) != 0.0)) {
+          tunpol_nz[n_tunpol_nz].idx = b;
+          tunpol_nz[n_tunpol_nz].val = real(v);
+          n_tunpol_nz++;
+        }
+      }
+
+      // ---------------------------------------------------------
+      // Precompute slot->eps mappings for all topologies
+      // ---------------------------------------------------------
+      struct TopoMap {
+        int slot_eps_grp[NUM_SLOTS]; // 0=A, 1=B
+        int slot_eps_pos[NUM_SLOTS]; // position within eps group
+      };
+      TopoMap topo_maps[NUM_EXCHANGE_TOPOS];
+      for (int t = 0; t < NUM_EXCHANGE_TOPOS; t++) {
+        const ExchangeTopology& topo = exchange_topos[t];
+        for (int s = 0; s < NUM_SLOTS; s++) {
+          topo_maps[t].slot_eps_grp[s] = -1;
+          topo_maps[t].slot_eps_pos[s] = -1;
+        }
+        for (int p = 0; p < 3; p++) {
+          topo_maps[t].slot_eps_grp[topo.eps_A[p]] = 0;
+          topo_maps[t].slot_eps_pos[topo.eps_A[p]] = p;
+          topo_maps[t].slot_eps_grp[topo.eps_B[p]] = 1;
+          topo_maps[t].slot_eps_pos[topo.eps_B[p]] = p;
+        }
+      }
+
+      // ---------------------------------------------------------
+      // Main per-site loop
+      // ---------------------------------------------------------
+      LatticeSpinMatrix result;
+      result = zero;
+
+      int num_sites = Layout::sitesOnNode();
+
+      for (int site = 0; site < num_sites; site++)
+      {
+        // Extract propagator elements at this site:
+        // prop[flavor][a_snk][a_src][s_snk][s_src]
+        // flavor 0=up, 1=down
+        Complex prop[2][Nc][Nc][Nd][Nd];
+
+        {
+          Propagator Su_site, Sd_site;
+          Su_site.elem() = S_u.elem(site);
+          Sd_site.elem() = S_d.elem(site);
+
+          for (int s1 = 0; s1 < Nd; s1++)
+            for (int s2 = 0; s2 < Nd; s2++) {
+              ColorMatrix cm_u = peekSpin(Su_site, s1, s2);
+              ColorMatrix cm_d = peekSpin(Sd_site, s1, s2);
+              for (int a = 0; a < Nc; a++)
+                for (int b = 0; b < Nc; b++) {
+                  prop[0][a][b][s1][s2] = peekColor(cm_u, a, b);
+                  prop[1][a][b][s1][s2] = peekColor(cm_d, a, b);
+                }
+            }
+        }
+
+        // Precompute Cg5 * transpose(S) per flavor/color:
+        // CgST[f][a_snk][b_src][s_row][s_col]
+        //   = sum_k Cg5(s_row, k) * prop[f][a_snk][b_src][k][s_col]
+        // (transposeSpin swaps the spin indices of the propagator,
+        //  then left-multiply by Cg5)
+        // Expanded: CgST[f][a][b][r][c] = sum_k Cg5(r,k) * prop[f][a][b][c][k]
+        // Note: transposeSpin(S)(r,c) = S(c,r), so
+        //   (Cg5 * transposeSpin(S))(r,c) = sum_k Cg5(r,k) * S(c,k)
+        Complex CgST[2][Nc][Nc][Nd][Nd];
+        for (int f = 0; f < 2; f++)
+          for (int a = 0; a < Nc; a++)
+            for (int b = 0; b < Nc; b++)
+              for (int r = 0; r < Nd; r++)
+                for (int c = 0; c < Nd; c++) {
+                  Complex sum = cmplx(Real(0), Real(0));
+                  for (int k = 0; k < Nd; k++)
+                    sum += peekSpin(Cg5, r, k) * prop[f][a][b][c][k];
+                  CgST[f][a][b][r][c] = sum;
+                }
+
+        // Precompute T_unpol-projected propagators for the open pair:
+        // Tv[f][a_snk][b_src][s_snk] = sum_beta prop[f][a][b][s_snk][beta] * T_unpol(beta,beta)
+        // Since T_unpol is diagonal, only sum over nonzero diagonal entries.
+        Complex Tv[2][Nc][Nc][Nd];
+        for (int f = 0; f < 2; f++)
+          for (int a = 0; a < Nc; a++)
+            for (int b = 0; b < Nc; b++)
+              for (int s = 0; s < Nd; s++) {
+                Complex sum = cmplx(Real(0), Real(0));
+                for (int it = 0; it < n_tunpol_nz; it++)
+                  sum += prop[f][a][b][s][tunpol_nz[it].idx] * tunpol_nz[it].val;
+                Tv[f][a][b][s] = sum;
+              }
+
+        // Accumulate result for this site
+        Complex result_local[Nd][Nd];
+        for (int s2 = 0; s2 < Nd; s2++)
+          for (int s5 = 0; s5 < Nd; s5++)
+            result_local[s2][s5] = cmplx(Real(0), Real(0));
+
+        // Loop over all 16 exchange topologies
+        for (int t = 0; t < NUM_EXCHANGE_TOPOS; t++)
+        {
+          const ExchangeTopology& topo = exchange_topos[t];
+          const TopoMap& tm = topo_maps[t];
+
+          // Source color loop (6 x 6 = 36 terms)
+          for (int eA = 0; eA < NUM_EPS_ENTRIES; eA++)
+          {
+            int cA[3] = {eps_table[eA].i, eps_table[eA].j, eps_table[eA].k};
+            int signA = eps_table[eA].sign;
+
+            for (int eB = 0; eB < NUM_EPS_ENTRIES; eB++)
+            {
+              int cB[3] = {eps_table[eB].i, eps_table[eB].j, eps_table[eB].k};
+              int signB = eps_table[eB].sign;
+
+              // Source color for each slot
+              int c_src[NUM_SLOTS];
+              for (int s = 0; s < NUM_SLOTS; s++) {
+                c_src[s] = (tm.slot_eps_grp[s] == 0) ?
+                  cA[tm.slot_eps_pos[s]] : cB[tm.slot_eps_pos[s]];
+              }
+
+              // Sink color loop (6 x 6 = 36 terms)
+              for (int eP = 0; eP < NUM_EPS_ENTRIES; eP++)
+              {
+                int aP[3] = {eps_table[eP].i, eps_table[eP].j, eps_table[eP].k};
+                int signP = eps_table[eP].sign;
+
+                for (int eN = 0; eN < NUM_EPS_ENTRIES; eN++)
+                {
+                  int aN[3] = {eps_table[eN].i, eps_table[eN].j, eps_table[eN].k};
+                  int signN = eps_table[eN].sign;
+
+                  int a_snk[NUM_SLOTS];
+                  a_snk[0] = aP[0]; a_snk[1] = aP[1]; a_snk[2] = aP[2];
+                  a_snk[3] = aN[0]; a_snk[4] = aN[1]; a_snk[5] = aN[2];
+
+                  int color_sign = topo.coeff * signA * signB * signP * signN;
+
+                  // Build 3 source pair elements: De[k][r][c]
+                  Complex De[3][Nd][Nd];
+
+                  for (int k = 0; k < 3; k++) {
+                    int pk = topo.cg5[k][0];
+                    int qk = topo.cg5[k][1];
+
+                    if (k == topo.open_pair) {
+                      // Inter-baryon pair: T_unpol projection
+                      for (int r = 0; r < Nd; r++)
+                        for (int c = 0; c < Nd; c++)
+                          De[k][r][c] =
+                            Tv[slot_flavor[pk]][a_snk[pk]][c_src[pk]][r] *
+                            Tv[slot_flavor[qk]][a_snk[qk]][c_src[qk]][c];
+                    } else {
+                      // Diquark pair: (S[p] * Cg5 * S[q]^T)(r,c)
+                      //   = sum_k S[p](r,k) * CgST[q](k,c)
+                      //   = sum_k prop[fp][asnk_p][csrc_p][r][k] * CgST[fq][asnk_q][csrc_q][k][c]
+                      int fp = slot_flavor[pk], fq = slot_flavor[qk];
+                      int ap = a_snk[pk], bp = c_src[pk];
+                      int aq = a_snk[qk], bq = c_src[qk];
+                      for (int r = 0; r < Nd; r++)
+                        for (int c = 0; c < Nd; c++) {
+                          Complex sum = cmplx(Real(0), Real(0));
+                          for (int kk = 0; kk < Nd; kk++)
+                            sum += prop[fp][ap][bp][r][kk] * CgST[fq][aq][bq][kk][c];
+                          De[k][r][c] = sum;
+                        }
+                    }
+                  }
+
+                  // Contract sink Cg5 and accumulate
+                  for (int s2 = 0; s2 < Nd; s2++) {
+                    for (int s5 = 0; s5 < Nd; s5++) {
+
+                      Complex acc = cmplx(Real(0), Real(0));
+
+                      for (int iP = 0; iP < n_cg5_nz; iP++) {
+                        int s0 = cg5_nz[iP].r;
+                        int s1 = cg5_nz[iP].c;
+
+                        for (int iN = 0; iN < n_cg5_nz; iN++) {
+                          int s3 = cg5_nz[iN].r;
+                          int s4 = cg5_nz[iN].c;
+
+                          int s[NUM_SLOTS] = {s0, s1, s2, s3, s4, s5};
+
+                          acc += cg5_nz[iP].val * cg5_nz[iN].val *
+                            De[0][s[topo.cg5[0][0]]][s[topo.cg5[0][1]]] *
+                            De[1][s[topo.cg5[1][0]]][s[topo.cg5[1][1]]] *
+                            De[2][s[topo.cg5[2][0]]][s[topo.cg5[2][1]]];
+                        }
+                      }
+
+                      result_local[s2][s5] +=
+                        cmplx(Real(color_sign), Real(0)) * acc;
+
+                    } // s5
+                  } // s2
+
+                } // eN
+              } // eP
+            } // eB
+          } // eA
+        } // topology
+
+        // Store result into LatticeSpinMatrix at this site
+        SpinMatrix res_site = zero;
+        for (int s2 = 0; s2 < Nd; s2++)
+          for (int s5 = 0; s5 < Nd; s5++)
+            pokeSpin(res_site, result_local[s2][s5], s2, s5);
+        result.elem(site) = res_site.elem();
+
+      } // site loop
+
+      END_CODE();
+      return result;
+
+#else
+      LatticeSpinMatrix a;
+      a = zero;
+      return a;
+#endif
+    }
+
+
+    // =================================================================
+    // Reference (original) implementation using lattice-wide QDP++ ops.
+    // Kept for verification - produces identical results but is O(23M)
+    // lattice-wide operations instead of a single site sweep.
+    // =================================================================
+    LatticeSpinMatrix dibaryonExchangeReference(
+        const LatticePropagator& S_u,
+        const LatticePropagator& S_d,
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol)
+    {
+#if QDP_NC == 3
+      START_CODE();
+
+      // ---------------------------------------------------------
+      // Step 1: Extract all color blocks as LatticeSpinMatrix
+      // ---------------------------------------------------------
+      LatticeSpinMatrix S_color[2][Nc][Nc];
+      for (int a = 0; a < Nc; a++)
+        for (int b = 0; b < Nc; b++) {
+          S_color[0][a][b] = peekColor(S_u, a, b);
+          S_color[1][a][b] = peekColor(S_d, a, b);
+        }
+
+      // ---------------------------------------------------------
+      // Step 2a: Precompute Cg5 * transpose(S)
+      // ---------------------------------------------------------
+      LatticeSpinMatrix CgST[2][Nc][Nc];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++)
+            CgST[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b]);
+
+      // ---------------------------------------------------------
+      // Step 2b: Precompute T_unpol-projected propagator sums
+      // ---------------------------------------------------------
+      LatticeComplex Tv[2][Nc][Nc][Nd];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++) {
+            LatticeSpinMatrix ST = S_color[f][a][b] * T_unpol;
+            for (int s = 0; s < Nd; s++) {
+              Tv[f][a][b][s] = zero;
+              for (int beta = 0; beta < Nd; beta++)
+                Tv[f][a][b][s] += peekSpin(ST, s, beta);
+            }
+          }
+
+      // ---------------------------------------------------------
+      // Step 3: Precompute nonzero Cg5 entries
+      // ---------------------------------------------------------
+      struct Cg5Entry { int r, c; Complex val; };
+      Cg5Entry cg5_nz[Nd*Nd];
+      int n_cg5_nz = 0;
+      for (int a = 0; a < Nd; a++)
+        for (int b = 0; b < Nd; b++) {
+          Complex v = peekSpin(Cg5, a, b);
+          if (toBool(real(v) != 0.0) || toBool(imag(v) != 0.0)) {
+            cg5_nz[n_cg5_nz].r = a;
+            cg5_nz[n_cg5_nz].c = b;
+            cg5_nz[n_cg5_nz].val = v;
+            n_cg5_nz++;
+          }
+        }
+
+      // ---------------------------------------------------------
+      // Step 4: Accumulate results
       // ---------------------------------------------------------
       LatticeComplex result_elem[Nd][Nd];
       for (int s2 = 0; s2 < Nd; s2++)
@@ -147,9 +406,8 @@ namespace Chroma
       {
         const ExchangeTopology& topo = exchange_topos[t];
 
-        // Map slots to source epsilon positions
         int slot_eps_pos[NUM_SLOTS];
-        int slot_eps_grp[NUM_SLOTS];  // 0=A, 1=B
+        int slot_eps_grp[NUM_SLOTS];
         for (int s = 0; s < NUM_SLOTS; s++) {
           slot_eps_pos[s] = -1;
           slot_eps_grp[s] = -1;
@@ -161,7 +419,6 @@ namespace Chroma
           slot_eps_pos[topo.eps_B[p]] = p;
         }
 
-        // Source color loop (36 terms: eps_A x eps_B)
         for (int eA = 0; eA < NUM_EPS_ENTRIES; eA++)
         {
           int cA[3] = {eps_table[eA].i, eps_table[eA].j, eps_table[eA].k};
@@ -172,14 +429,12 @@ namespace Chroma
             int cB[3] = {eps_table[eB].i, eps_table[eB].j, eps_table[eB].k};
             int signB = eps_table[eB].sign;
 
-            // Source color for each slot
             int c_src[NUM_SLOTS];
             for (int s = 0; s < NUM_SLOTS; s++) {
               c_src[s] = (slot_eps_grp[s] == 0) ?
                 cA[slot_eps_pos[s]] : cB[slot_eps_pos[s]];
             }
 
-            // Sink color loop (36 terms: eps_P x eps_N)
             for (int eP = 0; eP < NUM_EPS_ENTRIES; eP++)
             {
               int aP[3] = {eps_table[eP].i, eps_table[eP].j, eps_table[eP].k};
@@ -196,10 +451,6 @@ namespace Chroma
 
                 int color_sign = topo.coeff * signA * signB * signP * signN;
 
-                // Build source pair elements as LatticeComplex
-                // For diquark pairs: D(sp,sq) = (S[p] * Cg5 * S[q]^T)(sp,sq)
-                // For open pair: De[k][r][c] = Tv_p[r] * Tv_q[c]
-                //   (T_unpol projection on each propagator independently)
                 LatticeComplex De[3][Nd][Nd];
 
                 for (int k = 0; k < 3; k++) {
@@ -207,14 +458,12 @@ namespace Chroma
                   int qk = topo.cg5[k][1];
 
                   if (k == topo.open_pair) {
-                    // Inter-baryon pair: T_unpol projection (no Cg5)
                     for (int r = 0; r < Nd; r++)
                       for (int c = 0; c < Nd; c++)
                         De[k][r][c] =
                           Tv[slot_flavor[pk]][a_snk[pk]][c_src[pk]][r] *
                           Tv[slot_flavor[qk]][a_snk[qk]][c_src[qk]][c];
                   } else {
-                    // Diquark pair: Cg5 contraction
                     LatticeSpinMatrix D =
                       S_color[slot_flavor[pk]][a_snk[pk]][c_src[pk]]
                       * CgST[slot_flavor[qk]][a_snk[qk]][c_src[qk]];
@@ -224,15 +473,12 @@ namespace Chroma
                   }
                 }
 
-                // Contract sink Cg5 (proton diquark s0,s1; neutron diquark s3,s4)
-                // and accumulate into result_elem[s2][s5]
                 for (int s2 = 0; s2 < Nd; s2++) {
                   for (int s5 = 0; s5 < Nd; s5++) {
 
                     LatticeComplex acc;
                     acc = zero;
 
-                    // Sum over sink Cg5 pairs using nonzero entries
                     for (int iP = 0; iP < n_cg5_nz; iP++) {
                       int s0 = cg5_nz[iP].r;
                       int s1 = cg5_nz[iP].c;
@@ -241,22 +487,20 @@ namespace Chroma
                         int s3 = cg5_nz[iN].r;
                         int s4 = cg5_nz[iN].c;
 
-                        // All 6 sink spins determined
                         int s[NUM_SLOTS] = {s0, s1, s2, s3, s4, s5};
 
-                        // Product of 3 pair elements
                         acc += cg5_nz[iP].val * cg5_nz[iN].val *
                           De[0][s[topo.cg5[0][0]]][s[topo.cg5[0][1]]] *
                           De[1][s[topo.cg5[1][0]]][s[topo.cg5[1][1]]] *
                           De[2][s[topo.cg5[2][0]]][s[topo.cg5[2][1]]];
-                      } // iN
-                    } // iP
+                      }
+                    }
 
                     result_elem[s2][s5] +=
                       cmplx(Real(color_sign), Real(0)) * acc;
 
-                  } // s5
-                } // s2
+                  }
+                }
 
               } // eN
             } // eP

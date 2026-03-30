@@ -88,6 +88,18 @@ namespace Chroma
         const SpinMatrix& Cg5,
         const SpinMatrix& T_unpol);
 
+    //! Reference (slow) exchange contraction using lattice-wide QDP++ ops
+    /*!
+     * Identical algorithm to dibaryonExchange but using LatticeComplex
+     * operations in nested scalar loops. Kept for verification only —
+     * produces the same result but is ~1000x slower.
+     */
+    LatticeSpinMatrix dibaryonExchangeReference(
+        const LatticePropagator& S_u,
+        const LatticePropagator& S_d,
+        const SpinMatrix& Cg5,
+        const SpinMatrix& T_unpol);
+
     //! Compute FULL dibaryon correlator (spin-resolved)
     /*!
      * Returns a LatticeSpinMatrix from all 16 exchange topologies.
