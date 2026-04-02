@@ -14,6 +14,7 @@
  */
 
 #include "meas/hadron/dibaryon_contract_w.h"
+#include <complex>
 
 namespace Chroma
 {
@@ -61,7 +62,13 @@ namespace Chroma
 
 
     // =================================================================
-    // Exchange contraction: per-site scalar implementation
+    // Exchange contraction: hybrid GPU precompute + CPU per-site loop
+    //
+    // Phase 1: Use lattice-wide QDP++ ops to extract color blocks,
+    //          precompute CgST and Tv (runs on GPU via QDP-JIT).
+    // Phase 2: Extract spin elements from color blocks into flat
+    //          CPU arrays via peekSpin (lattice-wide, GPU-friendly).
+    // Phase 3: Per-site scalar contraction loop on CPU.
     // =================================================================
     LatticeSpinMatrix dibaryonExchange(
         const LatticePropagator& S_u,
@@ -89,10 +96,7 @@ namespace Chroma
           }
         }
 
-      // ---------------------------------------------------------
-      // Precompute nonzero T_unpol entries
-      // T_unpol = (1+gamma_4)/2: diagonal in DeGrand-Rossi basis
-      // ---------------------------------------------------------
+      // Precompute nonzero T_unpol diagonal entries
       struct TEntry { int idx; Real val; };
       TEntry tunpol_nz[Nd];
       int n_tunpol_nz = 0;
@@ -105,12 +109,10 @@ namespace Chroma
         }
       }
 
-      // ---------------------------------------------------------
       // Precompute slot->eps mappings for all topologies
-      // ---------------------------------------------------------
       struct TopoMap {
-        int slot_eps_grp[NUM_SLOTS]; // 0=A, 1=B
-        int slot_eps_pos[NUM_SLOTS]; // position within eps group
+        int slot_eps_grp[NUM_SLOTS];
+        int slot_eps_pos[NUM_SLOTS];
       };
       TopoMap topo_maps[NUM_EXCHANGE_TOPOS];
       for (int t = 0; t < NUM_EXCHANGE_TOPOS; t++) {
@@ -128,7 +130,55 @@ namespace Chroma
       }
 
       // ---------------------------------------------------------
-      // Main per-site loop
+      // Phase 1: Lattice-wide precomputation (GPU-friendly)
+      // Extract color blocks and precompute CgST, Tv
+      // ---------------------------------------------------------
+      LatticeSpinMatrix S_color[2][Nc][Nc];
+      for (int a = 0; a < Nc; a++)
+        for (int b = 0; b < Nc; b++) {
+          S_color[0][a][b] = peekColor(S_u, a, b);
+          S_color[1][a][b] = peekColor(S_d, a, b);
+        }
+
+      LatticeSpinMatrix CgST_lat[2][Nc][Nc];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++)
+            CgST_lat[f][a][b] = Cg5 * transposeSpin(S_color[f][a][b]);
+
+      LatticeComplex Tv_lat[2][Nc][Nc][Nd];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++) {
+            LatticeSpinMatrix ST = S_color[f][a][b] * T_unpol;
+            for (int s = 0; s < Nd; s++) {
+              Tv_lat[f][a][b][s] = zero;
+              for (int beta = 0; beta < Nd; beta++)
+                Tv_lat[f][a][b][s] += peekSpin(ST, s, beta);
+            }
+          }
+
+      // ---------------------------------------------------------
+      // Phase 2: Extract spin elements to LatticeComplex arrays
+      // (each peekSpin is one lattice-wide GPU op — fast)
+      // ---------------------------------------------------------
+      LatticeComplex SC[2][Nc][Nc][Nd][Nd];
+      LatticeComplex CG[2][Nc][Nc][Nd][Nd];
+      for (int f = 0; f < 2; f++)
+        for (int a = 0; a < Nc; a++)
+          for (int b = 0; b < Nc; b++)
+            for (int s1 = 0; s1 < Nd; s1++)
+              for (int s2 = 0; s2 < Nd; s2++) {
+                SC[f][a][b][s1][s2] = peekSpin(S_color[f][a][b], s1, s2);
+                CG[f][a][b][s1][s2] = peekSpin(CgST_lat[f][a][b], s1, s2);
+              }
+
+      // ---------------------------------------------------------
+      // Phase 3: Per-site contraction loop
+      // Access site data via .elem(site) on LatticeComplex objects.
+      // LatticeComplex elements are small (1 complex per site) so
+      // .elem(site) just reads from the host buffer after the
+      // lattice-wide peekSpin ops above have synced data to host.
       // ---------------------------------------------------------
       LatticeSpinMatrix result;
       result = zero;
@@ -137,67 +187,47 @@ namespace Chroma
 
       for (int site = 0; site < num_sites; site++)
       {
-        // Extract propagator elements at this site:
-        // prop[flavor][a_snk][a_src][s_snk][s_src]
-        // flavor 0=up, 1=down
-        Complex prop[2][Nc][Nc][Nd][Nd];
+        // Extract site-local scalar data from precomputed lattice arrays
+        // These are OScalar Complex values (2 doubles each)
+        typedef std::complex<double> cplx;
+        cplx sc[2][Nc][Nc][Nd][Nd];
+        cplx cg[2][Nc][Nc][Nd][Nd];
+        cplx tv[2][Nc][Nc][Nd];
 
-        {
-          Propagator Su_site, Sd_site;
-          Su_site.elem() = S_u.elem(site);
-          Sd_site.elem() = S_d.elem(site);
-
-          for (int s1 = 0; s1 < Nd; s1++)
-            for (int s2 = 0; s2 < Nd; s2++) {
-              ColorMatrix cm_u = peekSpin(Su_site, s1, s2);
-              ColorMatrix cm_d = peekSpin(Sd_site, s1, s2);
-              for (int a = 0; a < Nc; a++)
-                for (int b = 0; b < Nc; b++) {
-                  prop[0][a][b][s1][s2] = peekColor(cm_u, a, b);
-                  prop[1][a][b][s1][s2] = peekColor(cm_d, a, b);
-                }
-            }
-        }
-
-        // Precompute Cg5 * transpose(S) per flavor/color:
-        // CgST[f][a_snk][b_src][s_row][s_col]
-        //   = sum_k Cg5(s_row, k) * prop[f][a_snk][b_src][k][s_col]
-        // (transposeSpin swaps the spin indices of the propagator,
-        //  then left-multiply by Cg5)
-        // Expanded: CgST[f][a][b][r][c] = sum_k Cg5(r,k) * prop[f][a][b][c][k]
-        // Note: transposeSpin(S)(r,c) = S(c,r), so
-        //   (Cg5 * transposeSpin(S))(r,c) = sum_k Cg5(r,k) * S(c,k)
-        Complex CgST[2][Nc][Nc][Nd][Nd];
         for (int f = 0; f < 2; f++)
           for (int a = 0; a < Nc; a++)
-            for (int b = 0; b < Nc; b++)
-              for (int r = 0; r < Nd; r++)
-                for (int c = 0; c < Nd; c++) {
-                  Complex sum = cmplx(Real(0), Real(0));
-                  for (int k = 0; k < Nd; k++)
-                    sum += peekSpin(Cg5, r, k) * prop[f][a][b][c][k];
-                  CgST[f][a][b][r][c] = sum;
+            for (int b = 0; b < Nc; b++) {
+              for (int s1 = 0; s1 < Nd; s1++)
+                for (int s2 = 0; s2 < Nd; s2++) {
+                  // LatticeComplex.elem(site) -> PScalar<PScalar<RComplex<REAL>>>
+                  // .elem().elem() -> RComplex<REAL>
+                  // .real()/.imag() -> REAL
+                  sc[f][a][b][s1][s2] = cplx(
+                    toDouble(SC[f][a][b][s1][s2].elem(site).elem().elem().real()),
+                    toDouble(SC[f][a][b][s1][s2].elem(site).elem().elem().imag()));
+                  cg[f][a][b][s1][s2] = cplx(
+                    toDouble(CG[f][a][b][s1][s2].elem(site).elem().elem().real()),
+                    toDouble(CG[f][a][b][s1][s2].elem(site).elem().elem().imag()));
                 }
-
-        // Precompute T_unpol-projected propagators for the open pair:
-        // Tv[f][a_snk][b_src][s_snk] = sum_beta prop[f][a][b][s_snk][beta] * T_unpol(beta,beta)
-        // Since T_unpol is diagonal, only sum over nonzero diagonal entries.
-        Complex Tv[2][Nc][Nc][Nd];
-        for (int f = 0; f < 2; f++)
-          for (int a = 0; a < Nc; a++)
-            for (int b = 0; b < Nc; b++)
               for (int s = 0; s < Nd; s++) {
-                Complex sum = cmplx(Real(0), Real(0));
-                for (int it = 0; it < n_tunpol_nz; it++)
-                  sum += prop[f][a][b][s][tunpol_nz[it].idx] * tunpol_nz[it].val;
-                Tv[f][a][b][s] = sum;
+                tv[f][a][b][s] = cplx(
+                  toDouble(Tv_lat[f][a][b][s].elem(site).elem().elem().real()),
+                  toDouble(Tv_lat[f][a][b][s].elem(site).elem().elem().imag()));
               }
+            }
+
+        // Extract scalar Cg5 values (same for all sites)
+        // Only needed on first iteration but cheap enough to redo
+        cplx cg5_vals[Nd*Nd];
+        for (int i = 0; i < n_cg5_nz; i++)
+          cg5_vals[i] = cplx(toDouble(real(cg5_nz[i].val)),
+                             toDouble(imag(cg5_nz[i].val)));
 
         // Accumulate result for this site
-        Complex result_local[Nd][Nd];
+        cplx result_local[Nd][Nd];
         for (int s2 = 0; s2 < Nd; s2++)
           for (int s5 = 0; s5 < Nd; s5++)
-            result_local[s2][s5] = cmplx(Real(0), Real(0));
+            result_local[s2][s5] = cplx(0.0, 0.0);
 
         // Loop over all 16 exchange topologies
         for (int t = 0; t < NUM_EXCHANGE_TOPOS; t++)
@@ -205,7 +235,6 @@ namespace Chroma
           const ExchangeTopology& topo = exchange_topos[t];
           const TopoMap& tm = topo_maps[t];
 
-          // Source color loop (6 x 6 = 36 terms)
           for (int eA = 0; eA < NUM_EPS_ENTRIES; eA++)
           {
             int cA[3] = {eps_table[eA].i, eps_table[eA].j, eps_table[eA].k};
@@ -216,14 +245,12 @@ namespace Chroma
               int cB[3] = {eps_table[eB].i, eps_table[eB].j, eps_table[eB].k};
               int signB = eps_table[eB].sign;
 
-              // Source color for each slot
               int c_src[NUM_SLOTS];
               for (int s = 0; s < NUM_SLOTS; s++) {
                 c_src[s] = (tm.slot_eps_grp[s] == 0) ?
                   cA[tm.slot_eps_pos[s]] : cB[tm.slot_eps_pos[s]];
               }
 
-              // Sink color loop (6 x 6 = 36 terms)
               for (int eP = 0; eP < NUM_EPS_ENTRIES; eP++)
               {
                 int aP[3] = {eps_table[eP].i, eps_table[eP].j, eps_table[eP].k};
@@ -238,34 +265,30 @@ namespace Chroma
                   a_snk[0] = aP[0]; a_snk[1] = aP[1]; a_snk[2] = aP[2];
                   a_snk[3] = aN[0]; a_snk[4] = aN[1]; a_snk[5] = aN[2];
 
-                  int color_sign = topo.coeff * signA * signB * signP * signN;
+                  double color_sign = topo.coeff * signA * signB * signP * signN;
 
                   // Build 3 source pair elements: De[k][r][c]
-                  Complex De[3][Nd][Nd];
+                  cplx De[3][Nd][Nd];
 
                   for (int k = 0; k < 3; k++) {
                     int pk = topo.cg5[k][0];
                     int qk = topo.cg5[k][1];
 
                     if (k == topo.open_pair) {
-                      // Inter-baryon pair: T_unpol projection
                       for (int r = 0; r < Nd; r++)
                         for (int c = 0; c < Nd; c++)
                           De[k][r][c] =
-                            Tv[slot_flavor[pk]][a_snk[pk]][c_src[pk]][r] *
-                            Tv[slot_flavor[qk]][a_snk[qk]][c_src[qk]][c];
+                            tv[slot_flavor[pk]][a_snk[pk]][c_src[pk]][r] *
+                            tv[slot_flavor[qk]][a_snk[qk]][c_src[qk]][c];
                     } else {
-                      // Diquark pair: (S[p] * Cg5 * S[q]^T)(r,c)
-                      //   = sum_k S[p](r,k) * CgST[q](k,c)
-                      //   = sum_k prop[fp][asnk_p][csrc_p][r][k] * CgST[fq][asnk_q][csrc_q][k][c]
                       int fp = slot_flavor[pk], fq = slot_flavor[qk];
                       int ap = a_snk[pk], bp = c_src[pk];
                       int aq = a_snk[qk], bq = c_src[qk];
                       for (int r = 0; r < Nd; r++)
                         for (int c = 0; c < Nd; c++) {
-                          Complex sum = cmplx(Real(0), Real(0));
+                          cplx sum(0.0, 0.0);
                           for (int kk = 0; kk < Nd; kk++)
-                            sum += prop[fp][ap][bp][r][kk] * CgST[fq][aq][bq][kk][c];
+                            sum += sc[fp][ap][bp][r][kk] * cg[fq][aq][bq][kk][c];
                           De[k][r][c] = sum;
                         }
                     }
@@ -275,7 +298,7 @@ namespace Chroma
                   for (int s2 = 0; s2 < Nd; s2++) {
                     for (int s5 = 0; s5 < Nd; s5++) {
 
-                      Complex acc = cmplx(Real(0), Real(0));
+                      cplx acc(0.0, 0.0);
 
                       for (int iP = 0; iP < n_cg5_nz; iP++) {
                         int s0 = cg5_nz[iP].r;
@@ -287,15 +310,14 @@ namespace Chroma
 
                           int s[NUM_SLOTS] = {s0, s1, s2, s3, s4, s5};
 
-                          acc += cg5_nz[iP].val * cg5_nz[iN].val *
+                          acc += cg5_vals[iP] * cg5_vals[iN] *
                             De[0][s[topo.cg5[0][0]]][s[topo.cg5[0][1]]] *
                             De[1][s[topo.cg5[1][0]]][s[topo.cg5[1][1]]] *
                             De[2][s[topo.cg5[2][0]]][s[topo.cg5[2][1]]];
                         }
                       }
 
-                      result_local[s2][s5] +=
-                        cmplx(Real(color_sign), Real(0)) * acc;
+                      result_local[s2][s5] += color_sign * acc;
 
                     } // s5
                   } // s2
@@ -309,8 +331,11 @@ namespace Chroma
         // Store result into LatticeSpinMatrix at this site
         SpinMatrix res_site = zero;
         for (int s2 = 0; s2 < Nd; s2++)
-          for (int s5 = 0; s5 < Nd; s5++)
-            pokeSpin(res_site, result_local[s2][s5], s2, s5);
+          for (int s5 = 0; s5 < Nd; s5++) {
+            Complex val = cmplx(Real(result_local[s2][s5].real()),
+                                Real(result_local[s2][s5].imag()));
+            pokeSpin(res_site, val, s2, s5);
+          }
         result.elem(site) = res_site.elem();
 
       } // site loop
