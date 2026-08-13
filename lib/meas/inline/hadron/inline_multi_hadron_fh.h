@@ -58,6 +58,10 @@ namespace Chroma
         bool avg_equiv_mom;           //!< Average equivalent momenta
         int t0;                       //!< Source timeslice for t_eff calculation
 
+        bool save_blocks;             //!< Save spin-resolved single-hadron blocks (binary)
+        std::string block_species;    //!< Space-separated species list, e.g. "PROTON RHO"
+        multi1d<int> source_pos;      //!< Optional source position (sx sy sz st), recorded in block-file header
+
         //! List of multi-hadron states to compute
         multi1d<MultiHadronState_t> states;
 
@@ -72,6 +76,7 @@ namespace Chroma
         std::string perturbed_prop_id;    //!< Perturbed (FH) propagator
         std::string unperturbed_prop_id;  //!< Unperturbed propagator
         std::string output_file;          //!< Output filename
+        std::string block_file;           //!< Binary block-file name (required if save_blocks)
       };
 
       unsigned long frequency;
