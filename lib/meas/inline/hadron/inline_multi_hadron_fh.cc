@@ -814,7 +814,7 @@ namespace Chroma
     {
       START_CODE();
 
-      int Lt = h1_up.size2();
+      int Lt = phases.numSubsets();
 
       corr_A1.resize(Lt);
       corr_Ey.resize(Lt);
@@ -909,7 +909,7 @@ namespace Chroma
     {
       START_CODE();
 
-      int Lt = rho1_x.size2();
+      int Lt = phases.numSubsets();
 
       corr_A1.resize(Lt);
       corr_Ey.resize(Lt);
@@ -1005,7 +1005,7 @@ namespace Chroma
       START_CODE();
 
       int num_mom = phases.numMom();
-      int Lt = h1_up.size2();
+      int Lt = phases.numSubsets();
 
       corr_x.resize(Lt);
       corr_y.resize(Lt);
@@ -1359,7 +1359,7 @@ namespace Chroma
       START_CODE();
 
       int num_mom = phases.numMom();
-      int Lt = rho1_x.size2();
+      int Lt = phases.numSubsets();
 
       corr_x.resize(Lt);
       corr_y.resize(Lt);
@@ -1721,10 +1721,10 @@ namespace Chroma
             }
 
             // Compute spin-traced single-hadron correlators for reference output
-            hadron1_corr.resize(h1_up.size1(), h1_up.size2());
-            hadron2_corr.resize(h2_up.size1(), h2_up.size2());
-            for (int p = 0; p < h1_up.size1(); ++p)
-              for (int t = 0; t < h1_up.size2(); ++t)
+            hadron1_corr.resize(num_mom, Lt);
+            hadron2_corr.resize(num_mom, Lt);
+            for (int p = 0; p < num_mom; ++p)
+              for (int t = 0; t < Lt; ++t)
               {
                 hadron1_corr[p][t] = h1_up[p][t] + h1_down[p][t];
                 hadron2_corr[p][t] = h2_up[p][t] + h2_down[p][t];
