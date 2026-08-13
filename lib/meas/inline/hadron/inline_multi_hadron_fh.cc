@@ -1470,21 +1470,15 @@ namespace Chroma
               have_cartesian_states = true;
 
               // Full 6-quark contraction (direct + 16 exchange topologies)
-              // Only for proton-neutron at P=0
-              if (state.hadron1 == "PROTON" && state.hadron2 == "NEUTRON")
-              {
-                dibaryonCorrelatorFullContraction(up_prop, down_prop, phases,
-                                                  params.param.t0,
-                                                  full_corr_x, full_corr_y, full_corr_z,
-                                                  full_corr_direct, full_corr_exchange,
-                                                  proton_block_check, neutron_block_check);
-
-                full_corr_total.resize(Lt);
-                for (int t = 0; t < Lt; ++t)
-                  full_corr_total[t] = full_corr_x[t] + full_corr_y[t] + full_corr_z[t];
-
-                have_full_contraction = true;
-              }
+              // DISABLED: exchange contraction is too slow with current
+              // QDP-JIT per-site approach. Product ansatz correlators above
+              // are the primary output. Re-enable once the per-site
+              // contraction is optimized for the GPU backend.
+              // if (state.hadron1 == "PROTON" && state.hadron2 == "NEUTRON")
+              // {
+              //   dibaryonCorrelatorFullContraction(...);
+              //   have_full_contraction = true;
+              // }
             }
 
             // Compute spin-traced single-hadron correlators for reference output
