@@ -17,6 +17,9 @@
 #include "util/ft/sftmom.h"
 
 #include <fstream>
+#include <sstream>
+#include <vector>
+#include <cstdint>
 
 namespace Chroma
 {
@@ -148,6 +151,8 @@ namespace Chroma
       param.mom2_max = 4;
       param.avg_equiv_mom = true;
       param.t0 = 0;
+      param.save_blocks = false;
+      param.block_species = "PROTON";
     }
 
     Params::Params(XMLReader& xml_in, const std::string& path)
@@ -177,6 +182,22 @@ namespace Chroma
             read(ptop, "t0", param.t0);
           else
             param.t0 = 0;
+
+          // Spin-resolved single-hadron block output (optional)
+          if (ptop.count("save_blocks") == 1)
+            read(ptop, "save_blocks", param.save_blocks);
+          else
+            param.save_blocks = false;
+
+          if (ptop.count("block_species") == 1)
+            read(ptop, "block_species", param.block_species);
+          else
+            param.block_species = "PROTON";
+
+          // Optional source position, recorded in the block-file header
+          // (the measurement itself only needs t0)
+          if (ptop.count("source_pos") == 1)
+            read(ptop, "source_pos", param.source_pos);
 
           // Read multi-hadron states list
           if (ptop.count("states") == 1)
@@ -227,6 +248,17 @@ namespace Chroma
           read(ntop, "perturbed_prop_id", named_obj.perturbed_prop_id);
           read(ntop, "unperturbed_prop_id", named_obj.unperturbed_prop_id);
           read(ntop, "output_file", named_obj.output_file);
+
+          if (ntop.count("block_file") == 1)
+            read(ntop, "block_file", named_obj.block_file);
+          else
+            named_obj.block_file = "";
+        }
+
+        if (param.save_blocks && named_obj.block_file.empty())
+        {
+          QDPIO::cerr << "MULTI_HADRON_FH: save_blocks=true requires NamedObject/block_file" << std::endl;
+          QDP_abort(1);
         }
       }
       catch(const std::string& e)
@@ -246,6 +278,10 @@ namespace Chroma
       write(xml_out, "mom2_max", param.mom2_max);
       write(xml_out, "avg_equiv_mom", param.avg_equiv_mom);
       write(xml_out, "t0", param.t0);
+      write(xml_out, "save_blocks", param.save_blocks);
+      write(xml_out, "block_species", param.block_species);
+      if (param.source_pos.size() == 4)
+        write(xml_out, "source_pos", param.source_pos);
 
       push(xml_out, "states");
       for (int i = 0; i < param.states.size(); ++i)
@@ -268,6 +304,8 @@ namespace Chroma
       write(xml_out, "perturbed_prop_id", named_obj.perturbed_prop_id);
       write(xml_out, "unperturbed_prop_id", named_obj.unperturbed_prop_id);
       write(xml_out, "output_file", named_obj.output_file);
+      if (!named_obj.block_file.empty())
+        write(xml_out, "block_file", named_obj.block_file);
       pop(xml_out);
 
       pop(xml_out);
@@ -361,6 +399,142 @@ namespace Chroma
     {
       protonCorrelatorSpinResolved(down_prop, up_prop, phases, t0, corr_spin_up, corr_spin_down);
     }
+
+    //! Compute the full 2x2 upper-Dirac spin block of the proton correlator
+    /*!
+     * Same construction as protonCorrelatorSpinResolved (nucleonBlock with
+     * Cg5 diquark + positive-parity Tunpol projection), but returns all four
+     * upper-Dirac components (s_snk, s_src) = (0,0),(0,1),(1,0),(1,1), each
+     * momentum-resolved. The off-diagonal (spin-flip) components vanish at
+     * p = 0 but are needed for arbitrary polarization / irrep construction
+     * at p != 0.
+     *
+     * At the SU(3)-symmetric point the neutron block is this function with
+     * (up_prop, down_prop) swapped, i.e. with the FH-perturbation combo
+     * relabeled up <-> down; saving all four combos therefore makes a
+     * separate neutron record redundant.
+     *
+     * \param corr  Output, indexed corr[s] with s = 2*s_snk + s_src,
+     *              each [momentum][t_eff]
+     */
+    void protonSpinBlock2x2(
+      const LatticePropagator& up_prop,
+      const LatticePropagator& down_prop,
+      const SftMom& phases,
+      int t0,
+      multi1d< multi2d<DComplex> >& corr)
+    {
+      START_CODE();
+
+      int num_mom = phases.numMom();
+      int Lt = phases.numSubsets();
+
+      corr.resize(4);
+
+      SpinMatrix Cg5 = BaryonSpinMats::Cg5();
+      LatticeSpinMatrix block = NucleonBlocks::nucleonBlock(
+          up_prop, down_prop, up_prop, Cg5);
+
+      SpinMatrix parity_proj = BaryonSpinMats::Tunpol();
+      LatticeSpinMatrix spin_matrix = parity_proj * block;
+
+      for (int s1 = 0; s1 < 2; ++s1)
+        for (int s2 = 0; s2 < 2; ++s2)
+        {
+          int s = 2*s1 + s2;
+          LatticeComplex comp = peekSpin(spin_matrix, s1, s2);
+          multi2d<DComplex> hsum = phases.sft(comp);
+
+          corr[s].resize(num_mom, Lt);
+          for (int p = 0; p < num_mom; ++p)
+            for (int t = 0; t < Lt; ++t)
+            {
+              int t_eff = (t - t0 + Lt) % Lt;
+              corr[s][p][t_eff] = hsum[p][t];
+            }
+        }
+
+      END_CODE();
+    }
+
+
+    //------------------------------------------------------------------
+    // Binary block-file output (MHFH_BLOCKS v1)
+    //------------------------------------------------------------------
+
+    //! Number of block components for a species (PROTON: 2x2 spin, RHO: 3 pol)
+    static int blockSpeciesNumComp(const std::string& species)
+    {
+      if (species == "PROTON") return 4;
+      if (species == "RHO")    return 3;
+      QDPIO::cerr << "MULTI_HADRON_FH: unknown block species: " << species << std::endl;
+      QDP_abort(1);
+      return 0;
+    }
+
+    //! Write one [momentum][t_eff] complex record as raw native-endian float64 (re,im) pairs
+    static void writeComplexRecord(std::ofstream& ofs, const multi2d<DComplex>& corr,
+                                   int num_mom, int Lt)
+    {
+      for (int p = 0; p < num_mom; ++p)
+        for (int t = 0; t < Lt; ++t)
+        {
+          double re = toDouble(real(corr[p][t]));
+          double im = toDouble(imag(corr[p][t]));
+          ofs.write(reinterpret_cast<const char*>(&re), sizeof(double));
+          ofs.write(reinterpret_cast<const char*>(&im), sizeof(double));
+        }
+    }
+
+    //! Write the ASCII header of the MHFH_BLOCKS v1 file
+    static void writeBlockFileHeader(std::ofstream& ofs,
+                                     const Params& params,
+                                     const std::vector<std::string>& species_list,
+                                     const SftMom& phases,
+                                     int num_mom, int Lt)
+    {
+      uint16_t one = 1;
+      bool little = (*reinterpret_cast<uint8_t*>(&one) == 1);
+
+      ofs << "#MHFH_BLOCKS v1\n";
+      if (params.param.source_pos.size() == 4)
+        ofs << "# source = " << params.param.source_pos[0]
+            << " " << params.param.source_pos[1]
+            << " " << params.param.source_pos[2]
+            << " " << params.param.source_pos[3] << "\n";
+      ofs << "# t0 = " << params.param.t0 << "\n";
+      ofs << "# Lt = " << Lt << "\n";
+      ofs << "# mom2_max = " << params.param.mom2_max << "\n";
+      ofs << "# num_mom = " << num_mom << "\n";
+      for (int ip = 0; ip < num_mom; ++ip)
+      {
+        multi1d<int> mom = phases.numToMom(ip);
+        ofs << "# mom " << ip << " = "
+            << mom[0] << " " << mom[1] << " " << mom[2] << "\n";
+      }
+      ofs << "# num_combos = " << params.param.contractions.size() << "\n";
+      for (int ic = 0; ic < params.param.contractions.size(); ++ic)
+      {
+        const Params::FlavorCombination_t& c = params.param.contractions[ic];
+        ofs << "# combo " << ic << " = " << c.label
+            << " up=" << (c.up_is_perturbed ? 1 : 0)
+            << " down=" << (c.down_is_perturbed ? 1 : 0) << "\n";
+      }
+      ofs << "# num_species = " << species_list.size() << "\n";
+      for (size_t s = 0; s < species_list.size(); ++s)
+      {
+        if (species_list[s] == "PROTON")
+          ofs << "# species " << s << " = PROTON ncomp = 4 comps = s00 s01 s10 s11\n";
+        else if (species_list[s] == "RHO")
+          ofs << "# species " << s << " = RHO ncomp = 3 comps = x y z\n";
+      }
+      ofs << "# layout = [combo][species][comp][mom][t_eff] complex128 (re,im float64)\n";
+      ofs << "# endian = " << (little ? "little" : "big") << "\n";
+      ofs << "# note: PROTON comps are upper-Dirac (s_snk,s_src) entries of the Tunpol-projected nucleon block\n";
+      ofs << "# note: neutron blocks = PROTON blocks with the up/down perturbation combo swapped (SU(3)-symmetric point)\n";
+      ofs << "# end_header\n";
+    }
+
 
     //! Compute spin-traced proton correlator (for backward compatibility and output)
     void protonCorrelator(
@@ -1355,6 +1529,39 @@ namespace Chroma
         ofs << "#   state_Ez = E irrep, z-component (transverse)\n";
       }
 
+      // Parse requested block species and open the binary block file
+      std::vector<std::string> block_species_list;
+      std::ofstream ofs_blocks;
+      if (params.param.save_blocks)
+      {
+        std::istringstream iss(params.param.block_species);
+        std::string tok;
+        while (iss >> tok)
+        {
+          blockSpeciesNumComp(tok);  // validates; aborts on unknown species
+          block_species_list.push_back(tok);
+        }
+        if (block_species_list.empty())
+        {
+          QDPIO::cerr << "MULTI_HADRON_FH: save_blocks=true but block_species is empty" << std::endl;
+          QDP_abort(1);
+        }
+
+        if (Layout::primaryNode())
+        {
+          ofs_blocks.open(params.named_obj.block_file.c_str(),
+                          std::ios::binary | std::ios::trunc);
+          if (!ofs_blocks)
+          {
+            QDPIO::cerr << "MULTI_HADRON_FH: cannot open block_file: "
+                        << params.named_obj.block_file << std::endl;
+            QDP_abort(1);
+          }
+          writeBlockFileHeader(ofs_blocks, params, block_species_list,
+                               phases, num_mom, Lt);
+        }
+      }
+
       // Loop over flavor combinations
       push(xml_out, "Correlators");
 
@@ -1370,6 +1577,38 @@ namespace Chroma
         // Select propagators based on flavor assignment
         const LatticePropagator& up_prop = combo.up_is_perturbed ? perturbed_prop : unperturbed_prop;
         const LatticePropagator& down_prop = combo.down_is_perturbed ? perturbed_prop : unperturbed_prop;
+
+        // Save spin-resolved, momentum-resolved single-hadron blocks.
+        // sft() results are globally summed, so all ranks compute; only
+        // the primary node writes. Payload order matches the header's
+        // layout line: combo-major, then species, comp, mom, t_eff.
+        if (params.param.save_blocks)
+        {
+          for (size_t sidx = 0; sidx < block_species_list.size(); ++sidx)
+          {
+            const std::string& sp = block_species_list[sidx];
+            if (sp == "PROTON")
+            {
+              multi1d< multi2d<DComplex> > pblk;
+              protonSpinBlock2x2(up_prop, down_prop, phases, params.param.t0, pblk);
+              if (Layout::primaryNode())
+                for (int s = 0; s < 4; ++s)
+                  writeComplexRecord(ofs_blocks, pblk[s], num_mom, Lt);
+            }
+            else if (sp == "RHO")
+            {
+              multi2d<DComplex> rho_x, rho_y, rho_z;
+              rhoMesonCorrelatorAllPol(up_prop, down_prop, phases, params.param.t0,
+                                       rho_x, rho_y, rho_z);
+              if (Layout::primaryNode())
+              {
+                writeComplexRecord(ofs_blocks, rho_x, num_mom, Lt);
+                writeComplexRecord(ofs_blocks, rho_y, num_mom, Lt);
+                writeComplexRecord(ofs_blocks, rho_z, num_mom, Lt);
+              }
+            }
+          }
+        }
 
         push(xml_out, "flavor_combination");
         write(xml_out, "label", combo.label);
@@ -1862,6 +2101,13 @@ namespace Chroma
       {
         ofs.close();
         QDPIO::cout << "Correlators written to " << params.named_obj.output_file << std::endl;
+
+        if (params.param.save_blocks)
+        {
+          ofs_blocks.close();
+          QDPIO::cout << "Spin-resolved blocks written to "
+                      << params.named_obj.block_file << std::endl;
+        }
       }
 
       // Timing summary
